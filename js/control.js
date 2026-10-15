@@ -34,7 +34,7 @@
 
   var CAMPOS_VIAJE = [
     "clave", "dia", "interno", "placa", "viaje", "sin_despacho", "salio_cancelado", "hora_salida", "llego_en",
-    "ruta", "itinerario", "conductor", "pasajeros", "pasajeros_sensor", "subidas", "recortados", "estado_calculo",
+    "ruta", "itinerario", "punto_salida", "punto_llegada", "conductor", "pasajeros", "pasajeros_sensor", "subidas", "recortados", "estado_calculo",
     "civica_lectura", "civicas", "estado_civica", "lectura_corregida", "dano_id", "dano_estado",
     "tiquetes_escaneados", "tiquetes_corregidos", "control", "observaciones",
     "pasajeros_conductor", "pasajeros_conductor_corregidos", "pasajeros_conductor_en", "diferencia_con_sensor",
@@ -147,8 +147,20 @@
       return PALABRAS_RUTA[t.toLowerCase().replace(/\s+/g, "")] || capitalizar(t);
     }).join(" → ");
   }
+  // Los nombres de Sonar de los itinerarios que se despachan; se completan con los que traen los viajes.
+  var NOMBRES_ITINERARIO = {
+    "4500": "Terminalnorte-autopista-aeropuerto", "4501": "Aeropuerto-autopista-terminalnorte",
+    "4502": "Nutibara-exposiciones-tunel-aeropuerto", "4503": "Aeropuerto-Tunel-Exposiciones-Nutibara",
+    "4504": "ccsandiego-tunel-aeropuerto", "4505": "Almacentro-Tunel-Aeropuerto", "4507": "Aeropuerto - Tunel - ccsandiego",
+  };
+  function aprenderNombres(filas) {
+    (filas || []).forEach(function (f) { if (f.ruta && f.itinerario) NOMBRES_ITINERARIO[f.ruta] = f.itinerario; });
+  }
+  function nombreItinerario(id) { return rutaLegible(NOMBRES_ITINERARIO[id] || "") || (id ? "Ruta " + id : ""); }
+  // Sin despacho, Sonar no dice el itinerario: el viaje a viaje dice cuál se parece (sql v7), y el viaje
+  // sigue siendo sin despacho.
   function nombreRuta(f) {
-    if (f.sin_despacho) return "Sin despacho";
+    if (f.sin_despacho) return f.itinerario_estimado ? "Sin despacho · como " + nombreItinerario(f.itinerario_estimado) : "Sin despacho";
     return rutaLegible(f.itinerario) || (f.ruta ? "Ruta " + f.ruta : "Sin itinerario");
   }
 
@@ -306,6 +318,11 @@
       var r = await conTiempo(client.rpc("tarjeta_es_revisor"), 15000);
       state.revisor = r.data === true;
     } catch (_) { /* queda en solo lectura */ }
+    // ¿Ya corrieron la v7 del SQL? Con ella llega el itinerario estimado de los viajes sin despacho.
+    try {
+      var v7 = await conTiempo(client.from("v_tarjeta_viajes").select("itinerario_estimado").limit(1), 15000);
+      if (!v7.error && CAMPOS_VIAJE.indexOf("itinerario_estimado") < 0) CAMPOS_VIAJE += ",itinerario_estimado";
+    } catch (_) { /* sin la v7: los sin despacho salen sin itinerario */ }
     var rol = $("quienRol");
     rol.textContent = state.revisor ? "Puede corregir" : "Solo lectura";
     rol.setAttribute("data-tono", state.revisor ? "ok" : "revisa");
@@ -884,6 +901,8 @@
       if (res[0].error) throw res[0].error;
       if (b.interno !== interno || b.fecha !== fecha) return;
       b.filas = res[0].data || [];
+      aprenderNombres(b.filas);
+      b.recorridos = {};
       ponerBases(b.filas, res[7]);
       b.base = baseEn(res[7], interno, fecha);
       b.estadoBus = res[8] && res[8].data || null;
@@ -990,7 +1009,9 @@
     html += '<p class="pie no-imprimir">Toque un viaje para ver cada parada, quién escribió cada número y sus correcciones.' +
       (state.revisor ? "" : " Esta cuenta es de solo lectura: para corregir, hay que agregarla a tarjeta_revisores.") + "</p>";
     html += '<div class="firmas"><div>Firma del conductor</div><div>Firma de control</div></div>';
+    quitarMapas();
     cuerpo.innerHTML = html;
+    dibujarMapas();
   }
 
   function dato(titulo, valor) { return '<div class="dato"><span>' + esc(titulo) + "</span><strong>" + esc(valor) + "</strong></div>"; }
@@ -1017,7 +1038,10 @@
       "<td>" + (f.sin_despacho ? '<span class="sd">SIN DESPACHO</span>' : '<span class="viaje-n">' + esc(f.viaje) + "</span>") +
         (f.salio_cancelado ? '<span class="menor">cancelado, salió igual</span>' : "") + "</td>" +
       '<td class="num"><strong>' + hora(f.hora_salida) + '</strong><span class="menor">' + esc(llegada) + "</span></td>" +
-      "<td>" + esc(nombreRuta(f)) + (f.ruta ? '<span class="menor">' + esc(f.ruta) + "</span>" : "") + "</td>" +
+      (f.sin_despacho && f.itinerario_estimado
+        ? "<td>" + esc(nombreItinerario(f.itinerario_estimado)) + '<span class="menor">como el ' + esc(f.itinerario_estimado) +
+          " · lo encontró el viaje a viaje</span></td>"
+        : "<td>" + esc(nombreRuta(f)) + (f.ruta ? '<span class="menor">' + esc(f.ruta) + "</span>" : "") + "</td>") +
       "<td>" + esc(capitalizar(f.conductor || "—")) + "</td>" +
       '<td class="n"><strong>' + n(f.pasajeros_sensor) + '</strong><span class="menor">subieron ' + n(f.subidas) +
         (f.estado_calculo === "en_curso" ? ", hasta ahora" : "") + "</span></td>" +
@@ -1116,7 +1140,156 @@
         "</div></div>";
     });
     der += "</div>";
-    return '<div class="detalle">' + izq + der + "</div>";
+    return '<div class="detalle">' + bloqueRecorrido(f) + izq + der + "</div>";
+  }
+
+  // ---------------------------------------------------------------- el mapa del recorrido
+  // El recorrido GPS lo publica el programa de la oficina en tarjeta_recorridos (sql v7) cuando el viaje
+  // llega, en "polilínea codificada". Encima van las paradas donde se abrió la puerta (tarjeta_viajes.detalle).
+  // Leaflet se carga solo al abrir el primer viaje, para que la página arranque liviana.
+  var LEAFLET = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/";
+  var cargaLeaflet = null;
+  var mapas = [];
+
+  function cargarLeaflet() {
+    if (window.L) return Promise.resolve(window.L);
+    if (!cargaLeaflet) {
+      cargaLeaflet = new Promise(function (si, no) {
+        var css = document.createElement("link");
+        css.rel = "stylesheet";
+        css.href = LEAFLET + "leaflet.css";
+        document.head.appendChild(css);
+        var js = document.createElement("script");
+        js.src = LEAFLET + "leaflet.js";
+        js.onload = function () { si(window.L); };
+        js.onerror = function () { cargaLeaflet = null; no(new Error("No cargó el mapa")); };
+        document.head.appendChild(js);
+      });
+    }
+    return cargaLeaflet;
+  }
+
+  // "polilínea codificada" (el formato de Google, 5 decimales) -> [[lat, lon], ...]
+  function leerPolilinea(texto) {
+    var puntos = [], i = 0, lat = 0, lon = 0;
+    while (i < texto.length) {
+      var v = [0, 0];
+      for (var k = 0; k < 2; k++) {
+        var b, valor = 0, corrida = 0;
+        do {
+          b = texto.charCodeAt(i++) - 63;
+          valor |= (b & 0x1f) << corrida;
+          corrida += 5;
+        } while (b >= 0x20);
+        v[k] = valor & 1 ? ~(valor >> 1) : valor >> 1;
+      }
+      lat += v[0];
+      lon += v[1];
+      puntos.push([lat / 1e5, lon / 1e5]);
+    }
+    return puntos;
+  }
+
+  function bloqueRecorrido(f) {
+    var titulo, explica;
+    if (f.sin_despacho) {
+      titulo = f.itinerario_estimado
+        ? "Sin despacho · como el " + f.itinerario_estimado + " · " + nombreItinerario(f.itinerario_estimado)
+        : "Sin despacho · itinerario sin identificar";
+      explica = "No tiene despacho en Sonar: lo encontró el viaje a viaje porque se subieron " + n(f.subidas) + " personas" +
+        (f.punto_salida ? " en " + f.punto_salida : "") + (f.punto_llegada ? " y se bajaron en " + f.punto_llegada : "") +
+        (f.itinerario_estimado ? ". El itinerario es el que va de ahí a allá; Sonar no lo dice." : ".");
+    } else {
+      titulo = f.ruta ? "Itinerario " + f.ruta + " · " + (rutaLegible(f.itinerario) || nombreItinerario(f.ruta)) : "Sin itinerario en Sonar";
+      explica = "El itinerario es el del despacho en Sonar" +
+        (f.punto_salida || f.punto_llegada ? "; la gente se subió" + (f.punto_salida ? " en " + f.punto_salida : " fuera de los puntos") +
+          " y se bajó" + (f.punto_llegada ? " en " + f.punto_llegada : " fuera de los puntos") : "") + ".";
+    }
+    return '<div class="recorrido no-imprimir"><div class="recorrido-cabeza"><h3>' + esc(titulo) + "</h3>" +
+      '<span class="leyenda"><i style="background:' + (f.sin_despacho ? "#c2410c" : "#0b6b3a") + '"></i>recorrido' +
+      '<i class="punto" style="background:#16a34a"></i>suben<i class="punto" style="background:#d97706"></i>solo bajan</span></div>' +
+      '<p class="nota">' + esc(explica) + "</p>" +
+      '<div class="mapa" data-mapa="' + esc(f.clave) + '"></div><p class="nota mapa-nota"></p></div>';
+  }
+
+  function quitarMapas() {
+    mapas.forEach(function (m) { try { m.remove(); } catch (_) {} });
+    mapas = [];
+  }
+
+  async function recorridoDe(clave) {
+    var b = state.bus;
+    b.recorridos = b.recorridos || {};
+    if (!(clave in b.recorridos)) {
+      try {
+        var r = await conTiempo(client.from("tarjeta_recorridos").select("recorrido,puntos").eq("clave", clave).maybeSingle(), 15000);
+        b.recorridos[clave] = r.error ? null : r.data || null;
+      } catch (_) {
+        b.recorridos[clave] = null;
+      }
+    }
+    return b.recorridos[clave];
+  }
+
+  async function dibujarMapas() {
+    var cajas = Array.prototype.slice.call(document.querySelectorAll("[data-mapa]"));
+    if (!cajas.length) return;
+    var L;
+    try {
+      L = await cargarLeaflet();
+    } catch (_) {
+      cajas.forEach(function (c) { c.hidden = true; c.nextSibling.textContent = "No cargó el mapa. Revise el internet y vuelva a abrir el viaje."; });
+      return;
+    }
+    cajas.forEach(function (caja) { dibujarMapa(L, caja); });
+  }
+
+  async function dibujarMapa(L, caja) {
+    var b = state.bus, clave = caja.getAttribute("data-mapa");
+    var f = (b.filas || []).filter(function (x) { return x.clave === clave; })[0];
+    if (!f) return;
+    var rec = await recorridoDe(clave);
+    if (!caja.isConnected) return;               // se cerró o se volvió a pintar mientras tanto
+    var nota = caja.nextSibling;
+    var paradas = ((b.extra[clave] || {}).detalle || []).filter(function (p) { return p.lat != null && p.lon != null; });
+    var linea = rec && rec.recorrido ? leerPolilinea(rec.recorrido) : [];
+    if (!linea.length && !paradas.length) {
+      caja.hidden = true;
+      nota.textContent = "Este viaje no tiene puntos para el mapa.";
+      return;
+    }
+    var mapa = L.map(caja, { scrollWheelZoom: false });
+    mapas.push(mapa);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(mapa);
+    var limites = [];
+    if (linea.length) {
+      L.polyline(linea, { color: f.sin_despacho ? "#c2410c" : "#0b6b3a", weight: 4, opacity: 0.85 }).addTo(mapa);
+      limites = limites.concat(linea);
+    }
+    paradas.forEach(function (p) {
+      var suben = n(p.suben), bajan = n(p.bajan);
+      L.circleMarker([p.lat, p.lon], {
+        radius: 4 + Math.min(8, Math.sqrt(suben + bajan) * 1.6), color: "#fff", weight: 1.5,
+        fillColor: suben ? "#16a34a" : "#d97706", fillOpacity: 0.9,
+      }).bindTooltip(hora(p.hora) + (suben ? " · suben " + suben : "") + (bajan ? " · bajan " + bajan : "") +
+        (p.donde ? " · " + p.donde : "") + (p.tapado ? " · sensor tapado" : "")).addTo(mapa);
+      limites.push([p.lat, p.lon]);
+    });
+    if (linea.length) {
+      etiqueta(L, mapa, linea[0], "Salió " + hora(f.hora_salida));
+      etiqueta(L, mapa, linea[linea.length - 1], f.llego_en ? "Llegó " + hora(f.llego_en) : "Último punto");
+    }
+    mapa.fitBounds(limites, { padding: [28, 28], maxZoom: 15 });
+    nota.textContent = linea.length
+      ? "Recorrido GPS de Sonar, desde el despacho hasta la llegada. Toque un punto para ver la hora y cuántos subieron o bajaron."
+      : f.estado_calculo === "en_curso"
+        ? "El recorrido GPS sale cuando el viaje llegue. Por ahora, solo las paradas donde se abrió la puerta."
+        : "Todavía no está el recorrido GPS de este viaje (lo publica el programa de la oficina). Por ahora, solo las paradas donde se abrió la puerta.";
+  }
+
+  function etiqueta(L, mapa, punto, texto) {
+    L.circleMarker(punto, { radius: 6, color: "#111", weight: 2, fillColor: "#fff", fillOpacity: 1 })
+      .bindTooltip(texto, { permanent: true, direction: "top", offset: [0, -6], className: "mapa-etiqueta" }).addTo(mapa);
   }
 
   // ---------------------------------------------------------------- corregir lo del conductor
@@ -1282,7 +1455,9 @@
       "Día": f.dia, "Bus": f.interno, "Placa": f.placa || "", "Base": f.base || "",
       "Viaje": f.sin_despacho ? "SIN DESPACHO" : f.viaje,
       "Salió": hora(f.hora_salida), "Llegó": f.estado_calculo === "en_curso" ? "en camino" : hora(f.llego_en),
-      "Ruta": f.ruta || "", "Itinerario": nombreRuta(f), "Conductor": f.conductor || "",
+      "Ruta": f.ruta || (f.itinerario_estimado ? f.itinerario_estimado + " (estimada)" : ""), "Itinerario": nombreRuta(f),
+      "De dónde salió el viaje": f.sin_despacho ? "viaje a viaje (sin despacho)" : "despacho de Sonar",
+      "Punto de salida": f.punto_salida || "", "Punto de llegada": f.punto_llegada || "", "Conductor": f.conductor || "",
       "Pasajeros sensor": n(f.pasajeros_sensor), "Subidas sensor": n(f.subidas),
       "Pasajeros conductor": f.pasajeros_conductor == null ? "" : n(f.pasajeros_conductor),
       "Diferencia pasajeros": f.diferencia_con_sensor == null ? "" : n(f.diferencia_con_sensor),
@@ -1339,7 +1514,10 @@
   var POR = {
     interno: { titulo: "Bus", clave: function (f) { return f.interno; } },
     conductor: { titulo: "Conductor", clave: function (f) { return f.conductor || "(sin nombre en Sonar)"; } },
-    ruta: { titulo: "Ruta", clave: function (f) { return f.sin_despacho ? "Sin despacho" : f.ruta ? f.ruta + " · " + (rutaLegible(f.itinerario) || "") : "Sin itinerario"; } },
+    ruta: { titulo: "Ruta", clave: function (f) {
+      if (f.sin_despacho) return f.itinerario_estimado ? f.itinerario_estimado + " · " + nombreItinerario(f.itinerario_estimado) + " (sin despacho)" : "Sin despacho";
+      return f.ruta ? f.ruta + " · " + (rutaLegible(f.itinerario) || "") : "Sin itinerario";
+    } },
     dia: { titulo: "Día", clave: function (f) { return f.dia; } },
     base: { titulo: "Base", clave: function (f) { return f.base || SIN_BASE; } },
   };

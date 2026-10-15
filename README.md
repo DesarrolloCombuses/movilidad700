@@ -26,15 +26,30 @@ Cuando se publica una versión nueva, arriba sale **"Hay una versión nueva del 
 | Sección | Para qué |
 |---|---|
 | **Día** | Todos los buses de un día: viajes, pasajeros y plata del sensor y del conductor, la diferencia, cívicas, tiquetes y qué falta o hay que revisar. Una tabla **por base** con sus totales; al tocar una base queda solo esa. Filtros: con aviso, no cuadran, por revisar, falta algo, sin despacho, por base y por ruta. |
-| **Tarjeta del bus** | La tarjeta de papel completa, viaje por viaje. Al abrir un viaje se ve cada apertura de puerta (hora, suben, bajan, dónde, sensor tapado), quién escribió cada número y sus correcciones, y el daño del validador con su foto. Excel e imprimir con firmas. |
+| **Tarjeta del bus** | La tarjeta de papel completa, viaje por viaje. Al abrir un viaje se ve **el mapa de su recorrido** y por qué itinerario fue, cada apertura de puerta (hora, suben, bajan, dónde, sensor tapado), quién escribió cada número y sus correcciones, y el daño del validador con su foto. Excel e imprimir con firmas. |
 | **Informes** | Entre dos fechas, agrupado por bus, conductor, ruta, día o base, o de una sola base. Por conductor sale primero el que más plata dice de menos. El Excel trae el resumen, cada viaje, las correcciones, los daños y los avisos de los buses. |
 
 ## De dónde salen los datos
 
 Todo sale de Supabase:
 - **Los viajes y los pasajeros del sensor:** los escribe cada 5 minutos el programa de la tarjeta, que corre en el PC de la oficina (`tarjeta_viajes`).
-- **El estado de cada bus:** el mismo programa lo deja en `tarjeta_buses_dia`. Pasadas las 3:20 a. m. cierra el día anterior y lo deja definitivo.
+- **El estado de cada bus:** el mismo programa lo deja en `tarjeta_buses_dia`. Pasadas las 2:50 a. m. cierra el día anterior y lo deja definitivo.
+- **El recorrido GPS de cada viaje:** el mismo programa se lo pide a Sonar cuando el viaje llega y lo deja en `tarjeta_recorridos` (versión 7 del SQL).
 - **La cívica, los pasajeros y los tiquetes:** los escribe el conductor en **"Mi tarjeta"** de su aplicación (https://desarrollocombuses.github.io/combuconductores/).
+
+### El mapa de cada viaje
+
+Al abrir un viaje en la tarjeta del bus sale un mapa con:
+- **el recorrido GPS** desde el despacho hasta la llegada: verde si tuvo despacho, naranja si fue sin despacho;
+- **las paradas** donde se abrió la puerta: verde donde se subió gente, ámbar donde solo se bajó (al tocarlas dicen la hora y cuántos);
+- **"Salió" y "Llegó"** con su hora;
+- **arriba, por qué itinerario fue.**
+
+El recorrido aparece cuando el viaje llega. Mientras tanto, o si el viaje es de antes de la versión 7, salen solo las paradas.
+
+### Los viajes sin despacho
+
+Siguen marcados **SIN DESPACHO**, pero ahora dicen a qué itinerario se parecen, por ejemplo *"Aeropuerto → Túnel → CC San Diego · como el 4507 · lo encontró el viaje a viaje"*. Sonar no lo sabe, porque nadie los despachó. Lo deduce el viaje a viaje por el punto donde se subió la gente y el punto donde se bajó. En Informes por ruta van aparte, por ejemplo *"4507 · Aeropuerto → Túnel → CC San Diego (sin despacho)"*. El Excel dice de dónde salió cada viaje: el despacho de Sonar o el viaje a viaje.
 
 ### Avisos de los buses
 

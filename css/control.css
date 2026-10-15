@@ -237,6 +237,17 @@ tr.detalle-fila > td { padding: 0; background: var(--panel-2); }
 .detalle table { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .detalle th { position: static; }
 .bloque { margin-bottom: 14px; }
+
+/* El mapa del recorrido, arriba del detalle del viaje */
+.recorrido { grid-column: 1 / -1; }
+.recorrido-cabeza { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; }
+.recorrido-cabeza h3 { margin-bottom: 4px; }
+.leyenda { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.leyenda i { display: inline-block; width: 18px; height: 4px; border-radius: 2px; }
+.leyenda i.punto { width: 10px; height: 10px; border-radius: 50%; margin-left: 8px; }
+.mapa { position: relative; z-index: 0; height: 300px; margin-top: 8px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--panel); }
+.mapa-nota { margin-top: 6px; }
+.mapa-etiqueta { font: 600 12px/1.2 Inter, system-ui, sans-serif; padding: 2px 6px; }
 .registro { padding: 9px 11px; margin-bottom: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .registro-cabeza { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
 .registro-cabeza b { font-size: 13.5px; }

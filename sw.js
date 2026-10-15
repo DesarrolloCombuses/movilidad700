@@ -6,6 +6,7 @@
      - App shell (HTML/CSS/JS/iconos) ..... caché primero + revalidación de fondo
      - Librerías de CDN y tipografías ..... caché primero (están versionadas)
      - API Supabase (REST/Auth/Storage) ... solo red, nunca se guarda
+     - Mapa (cuadritos de OpenStreetMap) .. solo red: son miles y no hacen falta sin internet
 
    Lo de Supabase nunca se guarda: control siempre ve los números de ahora, y
    las tarjetas y la sesión no quedan en el disco del PC.
@@ -18,7 +19,7 @@
 // Igual a VERSION de js/control-config.js. No se cambia a mano: lo hace
 // nueva-version.ps1 en todos los sitios a la vez. Que este archivo cambie es
 // lo que avisa a los PC de que hay una versión nueva.
-const VERSION = "v0.4.1";
+const VERSION = "v0.5.0";
 const CACHE_APP = "control-app-" + VERSION;
 const CACHE_CDN = "control-cdn-" + VERSION;
 
@@ -42,7 +43,7 @@ const CDN_PRECACHE = [
 ];
 
 // Hosts cuyas respuestas nunca deben quedar en caché.
-const HOSTS_SIN_CACHE = ["supabase.co", "supabase.in"];
+const HOSTS_SIN_CACHE = ["supabase.co", "supabase.in", "tile.openstreetmap.org"];
 
 // -------------------------------------------------------------- install
 self.addEventListener("install", (event) => {
