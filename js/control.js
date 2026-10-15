@@ -83,6 +83,9 @@
     },
     inf: { desde: null, hasta: null, por: "interno", base: baseGuardada(), filas: null, porBus: null, conBases: false,
       error: null, cargando: false, progreso: 0, orden: null },
+    // Gestores (sql v8): sus celulares y lo que el programa decidió de cada código que leyó un conductor
+    ges: { fecha: null, lecturas: null, celulares: null, error: null, cargando: false },
+    v8: false,
   };
 
   // ================================================================ utilidades
@@ -323,6 +326,12 @@
       var v7 = await conTiempo(client.from("v_tarjeta_viajes").select("itinerario_estimado").limit(1), 15000);
       if (!v7.error && CAMPOS_VIAJE.indexOf("itinerario_estimado") < 0) CAMPOS_VIAJE += ",itinerario_estimado";
     } catch (_) { /* sin la v7: los sin despacho salen sin itinerario */ }
+    // ¿Y la v8? Con ella llegan los gestores que se restaron de cada viaje.
+    try {
+      var v8 = await conTiempo(client.from("v_tarjeta_viajes").select("gestores").limit(1), 15000);
+      state.v8 = !v8.error;
+      if (state.v8 && CAMPOS_VIAJE.indexOf(",gestores") < 0) CAMPOS_VIAJE += ",gestores";
+    } catch (_) { state.v8 = false; }
     var rol = $("quienRol");
     rol.textContent = state.revisor ? "Puede corregir" : "Solo lectura";
     rol.setAttribute("data-tono", state.revisor ? "ok" : "revisa");
@@ -363,12 +372,14 @@
   function enrutar() {
     if (!state.user) return;
     var partes = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
-    var vista = ["dia", "bus", "informes"].indexOf(partes[0]) >= 0 ? partes[0] : "dia";
+    var vista = ["dia", "bus", "informes", "gestores"].indexOf(partes[0]) >= 0 ? partes[0] : "dia";
     mostrarVista(vista);
     if (vista === "dia") {
       abrirDia(esFecha(partes[1]) ? partes[1] : state.dia.fecha || diaDeHoy());
     } else if (vista === "bus") {
       abrirBus(partes[1] || state.bus.interno, esFecha(partes[2]) ? partes[2] : state.bus.fecha || state.dia.fecha || diaDeHoy());
+    } else if (vista === "gestores") {
+      abrirGestores(esFecha(partes[1]) ? partes[1] : state.ges.fecha || state.dia.fecha || diaDeHoy());
     } else {
       abrirInformes();
     }
@@ -379,6 +390,7 @@
     $("vistaDia").hidden = vista !== "dia";
     $("vistaBus").hidden = vista !== "bus";
     $("vistaInformes").hidden = vista !== "informes";
+    $("vistaGestores").hidden = vista !== "gestores";
     Array.prototype.forEach.call(document.querySelectorAll("[data-pestana]"), function (a) {
       if (a.getAttribute("data-pestana") === vista) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
@@ -392,6 +404,7 @@
     var bus = document.querySelector('[data-pestana="bus"]');
     if (state.dia.fecha) dia.href = "#/dia/" + state.dia.fecha;
     if (state.bus.interno) bus.href = "#/bus/" + encodeURIComponent(state.bus.interno) + "/" + state.bus.fecha;
+    if (state.ges.fecha) document.querySelector('[data-pestana="gestores"]').href = "#/gestores/" + state.ges.fecha;
   }
 
   // ================================================================ resumen de un grupo de viajes
@@ -897,6 +910,9 @@
         traerBases(fecha, fecha).catch(function () { return null; }),
         conTiempo(client.from("tarjeta_buses_dia").select(CAMPOS_ESTADO_BUS).eq("interno", interno).eq("dia", fecha).maybeSingle())
           .catch(function () { return { data: null }; }),
+        // v8: los gestores que se subieron (solo los ven los despachadores)
+        state.v8 ? conTiempo(client.from("tarjeta_gestores").select(CAMPOS_GESTOR).eq("interno", interno).eq("dia", fecha).order("leido_en"))
+          .catch(function () { return { data: [] }; }) : Promise.resolve({ data: [] }),
       ]);
       if (res[0].error) throw res[0].error;
       if (b.interno !== interno || b.fecha !== fecha) return;
@@ -911,6 +927,7 @@
       b.historial = { civica: res[2].data || [], pasajeros: res[3].data || [], tiquetes: res[4].data || [] };
       b.danos = res[5].data || [];
       b.diaManual = res[6].data || null;
+      b.gestores = res[9] && res[9].data || [];
       b.error = null;
       // lo manual de cada viaje (quién escribió el control): se pide con las claves ya sabidas
       var claves = b.filas.map(function (f) { return f.clave; });
@@ -1044,7 +1061,9 @@
         : "<td>" + esc(nombreRuta(f)) + (f.ruta ? '<span class="menor">' + esc(f.ruta) + "</span>" : "") + "</td>") +
       "<td>" + esc(capitalizar(f.conductor || "—")) + "</td>" +
       '<td class="n"><strong>' + n(f.pasajeros_sensor) + '</strong><span class="menor">subieron ' + n(f.subidas) +
-        (f.estado_calculo === "en_curso" ? ", hasta ahora" : "") + "</span></td>" +
+        (f.estado_calculo === "en_curso" ? ", hasta ahora" : "") + "</span>" +
+        (n(f.gestores) ? '<span class="menor gestor-menos">' + (n(f.gestores) === 1 ? "+1 gestor" : "+" + n(f.gestores) + " gestores") +
+          " (no cuenta)</span>" : "") + "</td>" +
       '<td class="n">' + (f.pasajeros_conductor != null ? "<strong>" + esc(f.pasajeros_conductor) + "</strong>" +
         (f.pasajeros_conductor_corregidos ? '<span class="menor">corregido</span>' : "") : chip("", "falta")) + "</td>" +
       '<td class="n">' + (dif == null ? "—" : '<span class="' + claseDif(dif) + '">' + numDif(dif) + '</span><span class="menor">' +
@@ -1121,6 +1140,18 @@
       }
       der += "</div>";
     });
+
+    // Gestores que se subieron en este viaje (v8): el sensor los contó; la tarjeta resta los que cuadran
+    var suyos = (b.gestores || []).filter(function (g) { return g.clave_viaje === f.clave; });
+    if (suyos.length) {
+      der += '<div class="registro"><div class="registro-cabeza"><b>Gestores que subieron</b></div><ul class="gestores-lista">' +
+        suyos.map(function (g) {
+          return "<li>" + resultadoGestor(g) + " <strong>" + esc(capitalizar(g.nombre || "Cédula ···" + String(g.dni || "").slice(-4))) +
+            "</strong> · " + hora(g.leido_en) + (g.donde ? " · " + esc(g.donde) : "") +
+            (g.motivo ? '<span class="menor">' + esc(g.motivo) + "</span>" : "") + "</li>";
+        }).join("") + "</ul>" +
+        '<p class="nota">El conductor leyó el código del gestor; los que se restaron no cuentan en los pasajeros del viaje.</p></div>';
+    }
 
     // Daños del validador reportados en este viaje
     b.danos.filter(function (d) { return d.clave_viaje === f.clave; }).forEach(function (d) {
@@ -1207,7 +1238,9 @@
     }
     return '<div class="recorrido no-imprimir"><div class="recorrido-cabeza"><h3>' + esc(titulo) + "</h3>" +
       '<span class="leyenda"><i style="background:' + (f.sin_despacho ? "#c2410c" : "#0b6b3a") + '"></i>recorrido' +
-      '<i class="punto" style="background:#16a34a"></i>suben<i class="punto" style="background:#d97706"></i>solo bajan</span></div>' +
+      '<i class="punto" style="background:#16a34a"></i>suben<i class="punto" style="background:#d97706"></i>solo bajan' +
+      ((state.bus.gestores || []).some(function (g) { return g.clave_viaje === f.clave; })
+        ? '<i class="punto" style="background:' + COLOR_GESTOR + '"></i>gestor' : "") + "</span></div>" +
       '<p class="nota">' + esc(explica) + "</p>" +
       '<div class="mapa" data-mapa="' + esc(f.clave) + '"></div><p class="nota mapa-nota"></p></div>';
   }
@@ -1274,6 +1307,13 @@
       }).bindTooltip(hora(p.hora) + (suben ? " · suben " + suben : "") + (bajan ? " · bajan " + bajan : "") +
         (p.donde ? " · " + p.donde : "") + (p.tapado ? " · sensor tapado" : "")).addTo(mapa);
       limites.push([p.lat, p.lon]);
+    });
+    // Donde el conductor leyó el código de un gestor
+    (b.gestores || []).filter(function (g) { return g.clave_viaje === clave && g.lat != null && g.lon != null; }).forEach(function (g) {
+      L.circleMarker([g.lat, g.lon], { radius: 8, color: "#fff", weight: 2, fillColor: COLOR_GESTOR, fillOpacity: 0.95 })
+        .bindTooltip("Gestor " + capitalizar(g.nombre || "") + " · " + hora(g.leido_en) + " · " +
+          (g.resta ? "se restó" : "no se restó")).addTo(mapa);
+      limites.push([g.lat, g.lon]);
     });
     if (linea.length) {
       etiqueta(L, mapa, linea[0], "Salió " + hora(f.hora_salida));
@@ -1449,6 +1489,200 @@
       });
   }
 
+  // ================================================================ gestores (sql v8)
+  // El gestor activa su celular en el Portal del Conductor (selfie + huella) y aquí un despachador lo
+  // aprueba. Después, cada código que lee un conductor lo revisa el programa de la oficina y queda en
+  // tarjeta_gestores: si se restó del viaje o por qué no. Solo los despachadores ven estas tablas.
+  var CAMPOS_GESTOR = "id_local,dia,interno,clave_viaje,dni,nombre,marcado_en,leido_en,lat,lon,donde,valido,resta,motivo";
+  var CAMPOS_CELULAR = "id,dni,nombre,cargo,selfie,dispositivo,pedido_en,pedido_por,estado,aprobado_en,revisado_por,revisado_en,nota";
+  var COLOR_GESTOR = "#7c3aed";
+
+  function resultadoGestor(g) {
+    if (g.resta) return chip("ok", "Se restó");
+    if (g.motivo && /^Sospechoso/.test(g.motivo)) return chip("mal", "Sospechoso");
+    return chip("revisa", "No se restó");
+  }
+
+  function dispositivoCorto(ua) {
+    ua = String(ua || "");
+    var m = ua.match(/Android [\d.]+(?:; ([^;)]+))?/);
+    if (m) return "Android" + (m[1] && !/^K$/.test(m[1].trim()) ? " · " + m[1].trim() : "");
+    if (/iPhone|iPad/.test(ua)) return /iPad/.test(ua) ? "iPad" : "iPhone";
+    if (/Windows/.test(ua)) return "Windows";
+    return ua.slice(0, 40) || "—";
+  }
+
+  function abrirGestores(fecha) {
+    var g = state.ges;
+    var cambio = g.fecha !== fecha;
+    g.fecha = fecha;
+    $("gesFecha").value = fecha;
+    actualizarPestanas();
+    if (cambio || !g.lecturas) {
+      g.lecturas = null;
+      g.error = null;
+      pintarGestores();
+      cargarGestores();
+    } else {
+      pintarGestores();
+    }
+  }
+
+  async function cargarGestores() {
+    var g = state.ges, fecha = g.fecha;
+    if (!state.v8) { pintarGestores(); return; }
+    g.cargando = true;
+    try {
+      var res = await Promise.all([
+        conTiempo(client.from("tarjeta_gestores").select(CAMPOS_GESTOR).eq("dia", fecha).order("leido_en")),
+        conTiempo(client.from("gestores_celulares").select(CAMPOS_CELULAR).in("estado", ["pendiente", "aprobado"])
+          .order("pedido_en", { ascending: false })),
+      ]);
+      if (res[0].error) throw res[0].error;
+      if (res[1].error) throw res[1].error;
+      if (g.fecha !== fecha) return;
+      g.lecturas = res[0].data || [];
+      g.celulares = res[1].data || [];
+      g.error = null;
+    } catch (err) {
+      if (g.fecha === fecha) g.error = err;
+    } finally {
+      g.cargando = false;
+      if (state.vista === "gestores" && g.fecha === fecha) pintarGestores();
+    }
+  }
+
+  function tarjetaCelular(c) {
+    var aprobado = c.estado === "aprobado";
+    var otro = !aprobado && (state.ges.celulares || []).some(function (x) { return x.dni === c.dni && x.estado === "aprobado"; });
+    return '<div class="celular" data-estado="' + esc(c.estado) + '">' +
+      (/^data:image\//.test(c.selfie || "") ? '<img class="selfie" src="' + esc(c.selfie) + '" alt="Selfie de ' + esc(c.nombre) + '">' : '<span class="selfie"></span>') +
+      '<div class="celular-datos"><strong>' + esc(capitalizar(c.nombre || "Sin nombre")) + "</strong>" +
+        '<span class="menor">' + esc(capitalizar(c.cargo || "")) + " · cédula " + esc(c.dni) + "</span>" +
+        '<span class="menor">' + esc(dispositivoCorto(c.dispositivo)) + " · " +
+          (aprobado ? "aprobado el " + esc(momento(c.aprobado_en)) + (c.revisado_por ? " por " + esc(c.revisado_por) : "")
+            : "lo pidió el " + esc(momento(c.pedido_en))) + "</span>" +
+        (otro ? '<span class="menor aviso-cambio">Ya tiene otro celular aprobado: al aprobar este, el otro deja de servir.</span>' : "") +
+        (c.nota ? '<span class="menor">“' + esc(c.nota) + "”</span>" : "") +
+      "</div>" +
+      (state.revisor
+        ? '<div class="acciones">' + (aprobado
+            ? '<button class="btn btn-chico" type="button" data-celular-quitar="' + esc(c.id) + '">Quitar el celular</button>'
+            : '<button class="btn btn-chico btn-primario" type="button" data-celular-aprobar="' + esc(c.id) + '">Aprobar</button>' +
+              '<button class="btn btn-chico" type="button" data-celular-rechazar="' + esc(c.id) + '">Rechazar</button>') + "</div>"
+        : "") +
+      "</div>";
+  }
+
+  function pintarGestores() {
+    var g = state.ges;
+    var cuerpo = $("gesCuerpo");
+    $("gesSub").textContent = fechaLarga(g.fecha) + " (" + textoCorte() + "). El sensor de la puerta cuenta a los gestores " +
+      "como pasajeros: con su código, la tarjeta los resta.";
+    if (!state.v8) {
+      cuerpo.innerHTML = '<p class="caja-error">Falta correr la versión 8 del SQL de la tarjeta en Supabase. Con ella llegan los ' +
+        "celulares de los gestores y lo que leen los conductores.</p>";
+      return;
+    }
+    if (!state.revisor) {
+      cuerpo.innerHTML = '<p class="vacio">Solo los despachadores (tarjeta_revisores) ven los gestores y aprueban sus celulares.</p>';
+      return;
+    }
+    if (!g.lecturas) {
+      cuerpo.innerHTML = g.error ? cajaError("No se pudo traer lo de los gestores: " + textoError(g.error), "recargar-gestores")
+        : '<p class="cargando">Trayendo lo de los gestores…</p>';
+      return;
+    }
+    var pendientes = (g.celulares || []).filter(function (c) { return c.estado === "pendiente"; });
+    var aprobados = (g.celulares || []).filter(function (c) { return c.estado === "aprobado"; });
+    var restadas = g.lecturas.filter(function (x) { return x.resta; }).length;
+    var raras = g.lecturas.filter(function (x) { return !x.resta && /^Sospechoso/.test(x.motivo || ""); }).length;
+    function caja(titulo, grande, chico, tono) {
+      return '<div class="total"' + (tono ? ' data-tono="' + tono + '"' : "") + "><span>" + titulo + "</span><strong>" + grande + "</strong>" +
+        (chico ? "<small>" + chico + "</small>" : "") + "</div>";
+    }
+    var html = '<div class="totales">' +
+      caja("Códigos leídos", g.lecturas.length, "por los conductores este día") +
+      caja("Se restaron", restadas, "no cuentan como pasajeros", restadas ? "bien" : "") +
+      caja("No se restaron", g.lecturas.length - restadas - raras, "el motivo está en cada uno", g.lecturas.length - restadas - raras ? "revisa" : "") +
+      caja("Sospechosos", raras, raras ? "revíselos" : "ninguno", raras ? "mal" : "") +
+      caja("Celulares por aprobar", pendientes.length, aprobados.length + " aprobados", pendientes.length ? "revisa" : "") +
+      "</div>";
+
+    html += '<div class="bloque"><h2 class="titulo-bloque">Celulares por aprobar</h2>' + (pendientes.length
+      ? '<p class="nota">Mire que la foto sea de la persona. Al aprobarlo, su código sirve en todos los buses.</p>' +
+        '<div class="celulares">' + pendientes.map(tarjetaCelular).join("") + "</div>"
+      : '<p class="nota">Ningún celular esperando. El gestor lo pide desde el Portal del Conductor, en Mi código.</p>') + "</div>";
+
+    html += '<div class="bloque"><h2 class="titulo-bloque">Lo que leyeron los conductores</h2>';
+    if (!g.lecturas.length) {
+      html += '<p class="vacio">Ningún conductor leyó códigos de gestores este día. Lo leído aparece después de la siguiente ' +
+        "vuelta del programa de la oficina (cada 5 minutos).</p>";
+    } else {
+      html += '<div class="tabla-caja"><table><thead><tr><th>Hora</th><th>Bus</th><th>Gestor</th><th>Dónde</th><th>Resultado</th></tr></thead><tbody>' +
+        g.lecturas.map(function (x) {
+          return '<tr class="fila-link" tabindex="0" data-bus="' + esc(x.interno) + '" data-fecha="' + esc(x.dia) + '">' +
+            '<td class="num">' + hora(x.leido_en) + "</td><td><strong>" + esc(x.interno) + "</strong></td>" +
+            "<td>" + esc(capitalizar(x.nombre || "Sin nombre")) + '<span class="menor">cédula ···' + esc(String(x.dni || "").slice(-4)) + "</span></td>" +
+            "<td>" + esc(x.donde || "—") + "</td>" +
+            "<td>" + resultadoGestor(x) + (x.motivo ? '<span class="menor">' + esc(x.motivo) + "</span>" : "") + "</td></tr>";
+        }).join("") + "</tbody></table></div>";
+    }
+    html += "</div>";
+
+    html += '<div class="bloque"><h2 class="titulo-bloque">Celulares aprobados</h2>' + (aprobados.length
+      ? '<div class="celulares">' + aprobados.map(tarjetaCelular).join("") + "</div>"
+      : '<p class="nota">Todavía no hay celulares aprobados.</p>') + "</div>";
+    cuerpo.innerHTML = html;
+  }
+
+  // Aprobar, rechazar o quitar el celular de un gestor (gestor_revisar_celular: solo un despachador)
+  function abrirRevisarCelular(id, accion) {
+    var c = (state.ges.celulares || []).filter(function (x) { return String(x.id) === String(id); })[0];
+    if (!c) return;
+    var aprobar = accion === "aprobar";
+    var titulos = { aprobar: "Aprobar el celular", rechazar: "Rechazar el celular", quitar: "Quitar el celular" };
+    var explica = {
+      aprobar: "Desde ya, los códigos de " + capitalizar(c.nombre) + " sirven en todos los buses y se restan de los pasajeros." +
+        ((state.ges.celulares || []).some(function (x) { return x.dni === c.dni && x.estado === "aprobado"; })
+          ? " El celular que tenía aprobado deja de servir." : ""),
+      rechazar: "El gestor tiene que activar su celular otra vez (por ejemplo, con otra foto).",
+      quitar: "Sus códigos dejan de servir desde ya. Lo de antes se queda como estaba.",
+    };
+    abrirHoja(titulos[accion],
+      (/^data:image\//.test(c.selfie || "") ? '<img class="selfie selfie-grande" src="' + esc(c.selfie) + '" alt="Selfie">' : "") +
+      "<p><strong>" + esc(capitalizar(c.nombre)) + "</strong> · " + esc(capitalizar(c.cargo)) + " · cédula " + esc(c.dni) + "</p>" +
+      '<p class="nota">' + esc(explica[accion]) + "</p>" +
+      '<form id="formCelular" novalidate><label class="campo"><span>Nota' + (aprobar ? " (si quiere)" : " (obligatoria: por qué)") + "</span>" +
+        '<textarea id="celularNota" maxlength="300"></textarea></label>' +
+        '<p id="celularError" class="error" hidden style="margin-top:10px"></p>' +
+        '<div class="acciones"><button class="btn ' + (aprobar ? "btn-primario" : "btn-peligro") + '" type="submit" id="celularGuardar">' +
+          esc(titulos[accion].replace(" el celular", "")) + '</button><button class="btn" type="button" data-cerrar-hoja>Cancelar</button></div></form>',
+      function (caja) {
+        caja.querySelector("#formCelular").addEventListener("submit", async function (ev) {
+          ev.preventDefault();
+          var nota = $("celularNota").value.trim();
+          if (!aprobar && !nota) {
+            $("celularError").textContent = "Escriba por qué.";
+            $("celularError").hidden = false;
+            return;
+          }
+          $("celularGuardar").disabled = true;
+          try {
+            var res = await conTiempo(client.rpc("gestor_revisar_celular", { p_id: c.id, p_aprobar: aprobar, p_nota: nota || null }));
+            if (res.error) throw res.error;
+            cerrarHoja();
+            aviso(aprobar ? "Celular aprobado." : accion === "quitar" ? "Celular quitado." : "Celular rechazado.");
+            cargarGestores();
+          } catch (err) {
+            $("celularError").textContent = textoError(err);
+            $("celularError").hidden = false;
+            $("celularGuardar").disabled = false;
+          }
+        });
+      });
+  }
+
   // ---------------------------------------------------------------- Excel e imprimir
   function filaExcel(f) {
     return {
@@ -1459,6 +1693,7 @@
       "De dónde salió el viaje": f.sin_despacho ? "viaje a viaje (sin despacho)" : "despacho de Sonar",
       "Punto de salida": f.punto_salida || "", "Punto de llegada": f.punto_llegada || "", "Conductor": f.conductor || "",
       "Pasajeros sensor": n(f.pasajeros_sensor), "Subidas sensor": n(f.subidas),
+      "Gestores (no cuentan)": n(f.gestores),
       "Pasajeros conductor": f.pasajeros_conductor == null ? "" : n(f.pasajeros_conductor),
       "Diferencia pasajeros": f.diferencia_con_sensor == null ? "" : n(f.diferencia_con_sensor),
       "Pasaje": f.tarifa == null ? "" : n(f.tarifa),
@@ -1906,6 +2141,13 @@
     });
     $("infExcel").addEventListener("click", excelInforme);
 
+    // Gestores
+    $("gesFecha").addEventListener("change", function () { if (esFecha(this.value)) location.hash = "#/gestores/" + this.value; });
+    $("gesAntes").addEventListener("click", function () { location.hash = "#/gestores/" + sumarDias(state.ges.fecha, -1); });
+    $("gesDespues").addEventListener("click", function () { location.hash = "#/gestores/" + sumarDias(state.ges.fecha, 1); });
+    $("gesHoy").addEventListener("click", function () { location.hash = "#/gestores/" + diaDeHoy(); });
+    $("gesActualizar").addEventListener("click", function () { cargarGestores(); });
+
     // Clics dentro de las tablas y la tarjeta
     document.addEventListener("click", function (ev) {
       var t = ev.target;
@@ -1915,6 +2157,7 @@
         if (accion === "recargar-dia") cargarDia();
         else if (accion === "recargar-bus") { state.bus.error = null; pintarBus(); cargarBus(); }
         else if (accion === "recargar-informe") consultarInforme();
+        else if (accion === "recargar-gestores") cargarGestores();
         return;
       }
       if (t.closest("[data-cerrar-hoja]") || t === $("hoja")) return cerrarHoja();
@@ -1927,6 +2170,9 @@
       if ((el = t.closest("[data-foto]"))) return verFoto(el.getAttribute("data-foto"));
       if ((el = t.closest("[data-dano-aprobar]"))) return abrirRevisarDano(el.getAttribute("data-dano-aprobar"), true);
       if ((el = t.closest("[data-dano-rechazar]"))) return abrirRevisarDano(el.getAttribute("data-dano-rechazar"), false);
+      if ((el = t.closest("[data-celular-aprobar]"))) return abrirRevisarCelular(el.getAttribute("data-celular-aprobar"), "aprobar");
+      if ((el = t.closest("[data-celular-rechazar]"))) return abrirRevisarCelular(el.getAttribute("data-celular-rechazar"), "rechazar");
+      if ((el = t.closest("[data-celular-quitar]"))) return abrirRevisarCelular(el.getAttribute("data-celular-quitar"), "quitar");
       if (t.closest("a, input, textarea, select, form")) return;
       if ((el = t.closest("tr[data-viaje]"))) {
         var clave = el.getAttribute("data-viaje");

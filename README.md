@@ -28,6 +28,7 @@ Cuando se publica una versión nueva, arriba sale **"Hay una versión nueva del 
 | **Día** | Todos los buses de un día: viajes, pasajeros y plata del sensor y del conductor, la diferencia, cívicas, tiquetes y qué falta o hay que revisar. Una tabla **por base** con sus totales; al tocar una base queda solo esa. Filtros: con aviso, no cuadran, por revisar, falta algo, sin despacho, por base y por ruta. |
 | **Tarjeta del bus** | La tarjeta de papel completa, viaje por viaje. Al abrir un viaje se ve **el mapa de su recorrido** y por qué itinerario fue, cada apertura de puerta (hora, suben, bajan, dónde, sensor tapado), quién escribió cada número y sus correcciones, y el daño del validador con su foto. Excel e imprimir con firmas. |
 | **Informes** | Entre dos fechas, agrupado por bus, conductor, ruta, día o base, o de una sola base. Por conductor sale primero el que más plata dice de menos. El Excel trae el resumen, cada viaje, las correcciones, los daños y los avisos de los buses. |
+| **Gestores** | Los celulares de los gestores **por aprobar** (con su selfie) y los aprobados, y lo que leyeron los conductores cada día: qué se restó, qué no y qué es sospechoso. Solo para despachadores. |
 
 ## De dónde salen los datos
 
@@ -50,6 +51,16 @@ El recorrido aparece cuando el viaje llega. Mientras tanto, o si el viaje es de 
 ### Los viajes sin despacho
 
 Siguen marcados **SIN DESPACHO**, pero ahora dicen a qué itinerario se parecen, por ejemplo *"Aeropuerto → Túnel → CC San Diego · como el 4507 · lo encontró el viaje a viaje"*. Sonar no lo sabe, porque nadie los despachó. Lo deduce el viaje a viaje por el punto donde se subió la gente y el punto donde se bajó. En Informes por ruta van aparte, por ejemplo *"4507 · Aeropuerto → Túnel → CC San Diego (sin despacho)"*. El Excel dice de dónde salió cada viaje: el despacho de Sonar o el viaje a viaje.
+
+### Los gestores (v0.6.0, versión 8 del SQL)
+
+El sensor de la puerta cuenta a los gestores como pasajeros. Ahora el gestor muestra en su celular un código firmado con su huella y el conductor lo lee con su aplicación. El programa de la oficina lo revisa y, si cuadra, lo resta del viaje.
+
+- **Aprobar celulares:** en **Gestores**, cada celular nuevo sale con la selfie, el cargo, la cédula y el teléfono. Mire que la foto sea la persona y toque **Aprobar**; si no, **Rechazar** con el porqué. Un gestor tiene un solo celular: al aprobar uno nuevo, el anterior deja de servir. **Quitar el celular** lo deja sin código desde ya.
+- **Lo que leyeron los conductores:** cada código del día con su bus, hora, dónde y el resultado: **Se restó**, **No se restó** (con el motivo, por ejemplo "el sensor no contó a nadie subiendo a esa hora") o **Sospechoso** (el mismo código en dos buses, o el mismo gestor en dos buses a la vez). Al tocarlo abre la tarjeta del bus.
+- **En la tarjeta del bus:** los pasajeros del viaje ya vienen sin los gestores y dicen *"+1 gestor (no cuenta)"*. Al abrir el viaje sale quién subió, a qué hora y dónde, y un punto morado en el mapa.
+
+Sin la versión 8 del SQL, la pestaña lo dice y la tarjeta sale como antes.
 
 ### Avisos de los buses
 

@@ -337,3 +337,23 @@ tr.detalle-fila > td { padding: 0; background: var(--panel-2); }
   .firmas { display: flex; gap: 40px; margin-top: 40px; }
   .firmas div { flex: 1; padding-top: 6px; border-top: 1px solid #000; text-align: center; }
 }
+
+/* ---------------------------------------------------------------- gestores (sql v8) */
+.titulo-bloque { margin: 6px 0 8px; font-size: 17px; }
+.gestor-menos { color: #6d28d9; font-weight: 650; }
+.gestores-lista { margin: 4px 0 6px; padding-left: 0; list-style: none; }
+.gestores-lista li { padding: 4px 0; border-top: 1px solid var(--line); }
+.gestores-lista li:first-child { border-top: 0; }
+.celulares { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+.celular {
+  display: grid; grid-template-columns: 64px 1fr; gap: 4px 12px; align-items: start;
+  padding: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.celular[data-estado="pendiente"] { border-color: #f0d9a6; background: var(--warn-soft); }
+.celular .acciones { grid-column: 2; margin-top: 4px; }
+.celular-datos { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.celular-datos .menor { overflow-wrap: anywhere; }
+.aviso-cambio { color: var(--warn-ink); font-weight: 650; }
+.selfie { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; background: var(--line); border: 2px solid #fff; box-shadow: var(--shadow); }
+.selfie-grande { display: block; width: 160px; height: 160px; margin: 0 auto 10px; }
+@media (max-width: 420px) { .celulares { grid-template-columns: 1fr; } }

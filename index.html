@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./css/control.css?v=0.5.0">
+  <link rel="stylesheet" href="./css/control.css?v=0.6.0">
 </head>
 <body>
 
@@ -52,6 +52,7 @@
       <a href="#/dia" data-pestana="dia">Día</a>
       <a href="#/bus" data-pestana="bus">Tarjeta del bus</a>
       <a href="#/informes" data-pestana="informes">Informes</a>
+      <a href="#/gestores" data-pestana="gestores">Gestores</a>
     </nav>
     <div class="quien">
       <span id="quienCorreo" class="quien-correo"></span>
@@ -147,6 +148,24 @@
       <div id="infCuerpo"></div>
     </section>
 
+    <!-- ---- Gestores: sus celulares (aprobar) y lo que leyeron los conductores ---- -->
+    <section id="vistaGestores" class="vista" hidden>
+      <div class="cabeza">
+        <div>
+          <h1>Gestores</h1>
+          <p id="gesSub" class="sub">El sensor de la puerta cuenta a los gestores como pasajeros. Con su código, la tarjeta los resta.</p>
+        </div>
+        <div class="controles">
+          <button id="gesAntes" class="btn btn-sutil btn-cuadro" type="button" title="Día anterior" aria-label="Día anterior">‹</button>
+          <input id="gesFecha" type="date" aria-label="Día">
+          <button id="gesDespues" class="btn btn-sutil btn-cuadro" type="button" title="Día siguiente" aria-label="Día siguiente">›</button>
+          <button id="gesHoy" class="btn btn-sutil" type="button">Hoy</button>
+          <button id="gesActualizar" class="btn" type="button">Actualizar</button>
+        </div>
+      </div>
+      <div id="gesCuerpo"></div>
+    </section>
+
   </main>
 </div>
 
@@ -171,7 +190,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="./js/control-config.js?v=0.5.0"></script>
-<script src="./js/control.js?v=0.5.0"></script>
+<script src="./js/control-config.js?v=0.6.0"></script>
+<script src="./js/control.js?v=0.6.0"></script>
 </body>
 </html>
