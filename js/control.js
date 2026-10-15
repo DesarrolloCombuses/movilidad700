@@ -690,6 +690,7 @@
     var d = state.dia;
     var tabla = $("diaTabla");
     var totales = $("diaTotales");
+    $("diaExcel").disabled = !(d.filas && d.filas.length) || !!d.armandoExcel;
     if (!d.filas) {
       totales.innerHTML = "";
       $("diaBases").innerHTML = "";
@@ -1736,6 +1737,289 @@
     XLSX.writeFile(libro, "tarjeta_bus_" + b.interno + "_" + b.fecha + ".xlsx");
   }
 
+  // ---------------------------------------------------------------- Excel del viaje a viaje (toda la flota)
+  // El mismo Excel que arma el programa de Python para los auxiliares (enturnes/viaje_a_viaje.py), con lo
+  // que hay en Supabase: cada apertura de puerta y el total de cada viaje con fórmulas, el resumen por viaje
+  // y el resumen por bus. Lo que el conductor escribió en "Mi tarjeta" va en TARJETA y manda sobre el
+  // sensor; el auxiliar lo puede cambiar en el Excel y todo se recalcula.
+  // No trae la hoja "Fuera de la ruta" ni las aperturas sin viaje: de esas Supabase solo sabe cuántas fueron.
+  // Va con ExcelJS porque lleva los colores (la herramienta de los otros Excel no los escribe); se carga al
+  // tocar el botón, como el mapa.
+  var EXCELJS = "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js";
+  var cargaExcelJS = null;
+  var TOPE = 19;   // la capacidad del bus: lo que el sensor cuente de más en un viaje es error (igual al programa)
+  var COLOR_VAV = { verde: "C6EFCE", ambar: "FFEB9C", rojo: "FFC7CE", azul: "DDEBF7", titulo: "1F4E78" };
+
+  function cargarExcelJS() {
+    if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+    if (!cargaExcelJS) {
+      cargaExcelJS = new Promise(function (si, no) {
+        var js = document.createElement("script");
+        js.src = EXCELJS;
+        js.onload = function () { if (window.ExcelJS) si(window.ExcelJS); else no(new Error("No cargó la herramienta del Excel")); };
+        js.onerror = function () { cargaExcelJS = null; no(new Error("No cargó la herramienta del Excel. Revise el internet.")); };
+        document.head.appendChild(js);
+      });
+    }
+    return cargaExcelJS;
+  }
+
+  // La hora de Colombia (UTC-5, sin horario de verano) como la escribe el programa: "2026-10-14" y "19:38:22".
+  function enColombia(iso) {
+    var ms = Date.parse(iso || "");
+    return isNaN(ms) ? "" : new Date(ms - 5 * HORA_MS).toISOString();
+  }
+  function fechaVaV(iso) { return enColombia(iso).slice(0, 10); }
+  function horaVaV(iso) { return enColombia(iso).slice(11, 19); }
+
+  function rellenoVaV(color) { return { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + color } }; }
+
+  // Una hoja con el encabezado azul de los auxiliares. poner() agrega un renglón (un valor puede ser
+  // { formula, result }: el resultado ya calculado, para que se vea aunque el programa no recalcule) y
+  // devuelve su número; cerrar() deja los anchos como el programa (de 9 a 46 letras).
+  function hojaVaV(libro, nombre, titulos) {
+    var ws = libro.addWorksheet(nombre, { views: [{ state: "frozen", ySplit: 1 }] });
+    var h = { ws: ws, ultima: 1, largos: titulos.map(function (t) { return String(t).length; }) };
+    var cab = ws.addRow(titulos);
+    for (var i = 1; i <= titulos.length; i++) {
+      var c = cab.getCell(i);
+      c.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      c.fill = rellenoVaV(COLOR_VAV.titulo);
+      c.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    }
+    h.poner = function (valores, color, negrita) {
+      var fila = ws.addRow(valores);
+      if (color || negrita) {
+        for (var i = 1; i <= titulos.length; i++) {
+          var c = fila.getCell(i);
+          if (color) c.fill = rellenoVaV(color);
+          if (negrita) c.font = { bold: true };
+        }
+      }
+      if (fila.number <= 501) {
+        valores.forEach(function (v, i) {
+          var x = v && typeof v === "object" ? v.result : v;
+          if (x != null && i < h.largos.length) h.largos[i] = Math.max(h.largos[i], String(x).length);
+        });
+      }
+      h.ultima = fila.number;
+      return fila.number;
+    };
+    h.pintar = function (renglon, columna, color) { ws.getRow(renglon).getCell(columna).fill = rellenoVaV(color); };
+    h.cerrar = function () {
+      h.largos.forEach(function (l, i) { ws.getColumn(i + 1).width = Math.min(Math.max(9, l + 2), 46); });
+    };
+    return h;
+  }
+
+  function formula(texto, resultado) { return { formula: texto, result: resultado }; }
+
+  // Lo que va en la columna Itinerario, como el programa.
+  function itinerarioVaV(f, x, eventos) {
+    if (f.sin_despacho) {
+      var suben = eventos.filter(function (e) { return n(e.suben); });
+      var bajan = eventos.filter(function (e) { return n(e.bajan); });
+      var desde = f.punto_salida || (suben[0] && suben[0].donde) || "?";
+      var hasta = f.punto_llegada || (bajan.length && bajan[bajan.length - 1].donde) || "?";
+      return "Sin despacho: se subieron en " + desde + ", se bajaron en " + hasta +
+        (f.itinerario_estimado ? " (como el " + f.itinerario_estimado + ")" : "");
+    }
+    var texto = f.itinerario || (f.ruta ? "Ruta " + f.ruta : "Sin itinerario");
+    if (f.salio_cancelado) return texto + " (lo cancelaron en Sonar pero salió con gente)";
+    return texto + (x.cancelado_sonar ? " (cancelado en Sonar)" : "");
+  }
+
+  function armarViajeAViaje(libro, filas, extra, sinViajes) {
+    var V = hojaVaV(libro, "Viaje a viaje", ["Vehiculo", "Viaje", "Fecha", "Hora", "Entradas", "Salidas", "Combuses",
+      "No pasajeros", "TARJETA (si la escribe, manda)", "CONTEO SENSOR", "EVIDENCIA VIDEO", "Bloqueos", "Direccion",
+      "Conductor", "Itinerario", "Gestores (no cuentan)", "Base"]);
+    var viajes = [], buses = [], bus = null;
+    filas.forEach(function (f) {
+      if (!bus || bus.interno !== f.interno) {
+        if (bus) V.poner([]);
+        bus = { interno: f.interno, base: f.base || "", viajes: [] };
+        buses.push(bus);
+      }
+      var x = extra[f.clave] || {};
+      var eventos = (x.detalle || []).slice().sort(function (a, b) { return String(a.hora).localeCompare(String(b.hora)); });
+      var primero = 0, ultimo = 0, entran = 0, salen = 0;
+      eventos.forEach(function (e) {
+        var r = V.poner([f.interno, null, fechaVaV(e.hora), horaVaV(e.hora), n(e.suben), n(e.bajan), null, null, null, null,
+          null, e.tapado ? "Sensor tapado" : null, e.donde || null, f.conductor || null, null, n(e.gestores) || null, null],
+          n(e.suben) ? COLOR_VAV.verde : null);
+        if (!primero) primero = r;
+        ultimo = r;
+        entran += n(e.suben);
+        salen += n(e.bajan);
+      });
+      // El total del viaje. La TARJETA se puede escribir en cualquier renglón del viaje (así la anotan los
+      // auxiliares); si hay un número, aunque sea 0, manda sobre el sensor. El conteo del sensor ya va sin
+      // los gestores y con el tope de 19, como lo calcula el programa.
+      var r = V.ultima + 1;
+      var bloque = primero ? "I" + primero + ":I" + r : "I" + r;
+      var gestores = n(f.gestores);
+      var tarjeta = f.pasajeros_conductor == null ? null : n(f.pasajeros_conductor);
+      var sensor = Math.min(Math.max(0, entran - gestores), TOPE);
+      var combuses = tarjeta == null ? sensor : tarjeta;
+      var notas = [];
+      if (f.sin_despacho) notas.push("VIAJE SIN DESPACHO: el bus llevó gente y nadie lo despachó");
+      else if (n(f.recortados)) notas.push("REVISAR: el sensor pasó de " + TOPE);
+      if (gestores) notas.push(gestores === 1 ? "1 gestor subió con su código: no cuenta" : gestores + " gestores subieron con su código: no cuentan");
+      if (f.pasajeros != null && n(f.pasajeros) !== n(f.pasajeros_sensor)) notas.push("Control corrigió el sensor a " + n(f.pasajeros));
+      if (f.estado_calculo === "en_curso") notas.push("EN CAMINO: el sensor todavía puede contar");
+      V.poner([f.interno, f.sin_despacho ? "SIN DESPACHO" : f.viaje, fechaVaV(f.hora_salida),
+        horaVaV(f.hora_salida) + " a " + (f.estado_calculo === "en_curso" ? "en camino" : horaVaV(f.llego_en)),
+        primero ? formula("SUM(E" + primero + ":E" + ultimo + ")", entran) : 0,
+        primero ? formula("SUM(F" + primero + ":F" + ultimo + ")", salen) : 0,
+        formula("IF(COUNT(" + bloque + ")>0,SUM(" + bloque + "),J" + r + ")", combuses),
+        formula("MAX(0,E" + r + "-G" + r + ")", Math.max(0, entran - combuses)),
+        tarjeta,
+        formula("MIN(MAX(0,E" + r + "-P" + r + ")," + TOPE + ")", sensor),
+        null, null, notas.join(". ") || null, f.conductor || null, itinerarioVaV(f, x, eventos), gestores || null, f.base || null],
+        f.sin_despacho ? COLOR_VAV.ambar : n(f.recortados) ? COLOR_VAV.rojo : COLOR_VAV.azul, true);
+      V.poner([]);
+      viajes.push({ f: f, x: x, eventos: eventos, r: r, bloque: bloque, entran: entran, salen: salen, gestores: gestores,
+        tarjeta: tarjeta, sensor: sensor, combuses: combuses, no: Math.max(0, entran - combuses) });
+      bus.viajes.push(viajes[viajes.length - 1]);
+    });
+    V.cerrar();
+    V.ws.autoFilter = "A1:Q" + Math.max(2, V.ultima);
+
+    // ------------------------------------------------------------------ resumen por viaje
+    var VV = "'Viaje a viaje'!";
+    var R = hojaVaV(libro, "Resumen por viaje", ["Vehiculo", "Viaje", "Fecha", "Salio", "Cerro", "Itinerario",
+      "Cancelado en Sonar", "Entradas del sensor", "Salidas", "PERSONAS MOVILIZADAS", "No pasajeros", "Alerta",
+      "TARJETA (conductor)", "CONTEO SENSOR", "Gestores (no cuentan)", "Conductor", "Base", "Numero de despacho"]);
+    viajes.forEach(function (v) {
+      var f = v.f, r = v.r;
+      var alerta = f.sin_despacho ? "Viaje SIN DESPACHO: nadie lo despachó"
+        : n(f.recortados) ? "El sensor contó " + (v.entran - v.gestores) + ", más que la capacidad (" + TOPE + ")"
+        : f.estado_calculo === "en_curso" ? "En camino: todavía puede cambiar" : "";
+      v.rr = R.poner([f.interno, f.sin_despacho ? "SIN DESPACHO" : f.viaje, fechaVaV(f.hora_salida), horaVaV(f.hora_salida),
+        f.estado_calculo === "en_curso" ? "en camino" : horaVaV(f.llego_en), itinerarioVaV(f, v.x, v.eventos),
+        v.x.cancelado_sonar || f.salio_cancelado ? "Si" : null,
+        formula(VV + "E" + r, v.entran), formula(VV + "F" + r, v.salen), formula(VV + "G" + r, v.combuses),
+        formula(VV + "H" + r, v.no), alerta || null,
+        formula("IF(COUNT(" + VV + v.bloque + ")>0,SUM(" + VV + v.bloque + "),\"\")", v.tarjeta == null ? "" : v.tarjeta),
+        formula(VV + "J" + r, v.sensor), v.gestores || null, f.conductor || null, f.base || null,
+        f.sin_despacho ? null : f.clave]);
+      R.pintar(v.rr, 10, COLOR_VAV.verde);
+      if (alerta) R.pintar(v.rr, 12, COLOR_VAV.rojo);
+    });
+    R.cerrar();
+
+    // ------------------------------------------------------------------ resumen por bus
+    var RV = "'Resumen por viaje'!";
+    var B = hojaVaV(libro, "Resumen por bus", ["Vehiculo", "Viajes", "PERSONAS MOVILIZADAS", "Promedio por viaje",
+      "No pasajeros", "Viajes SIN DESPACHO", "Personas en viajes sin despacho", "Gestores (no cuentan)", "Base"]);
+    sinViajes.forEach(function (e) {
+      if (!buses.some(function (b) { return b.interno === e.interno; })) buses.push({ interno: e.interno, base: e.base || "", viajes: [] });
+    });
+    buses.forEach(function (b) {
+      b.movilizados = 0; b.no = 0; b.sd = 0; b.sdPersonas = 0; b.gestores = 0;
+      b.viajes.forEach(function (v) {
+        b.movilizados += v.combuses;
+        b.no += v.no;
+        b.gestores += v.gestores;
+        if (v.f.sin_despacho) { b.sd++; b.sdPersonas += v.combuses; }
+      });
+    });
+    buses.sort(function (a, b) { return b.movilizados - a.movilizados || compararInternos(a.interno, b.interno); });
+    buses.forEach(function (b) {
+      var k = B.ultima + 1, cuantos = b.viajes.length;
+      if (cuantos) {
+        var a = b.viajes[0].rr, z = b.viajes[cuantos - 1].rr;
+        var col = function (c) { return RV + c + a + ":" + c + z; };
+        B.poner([b.interno, cuantos,
+          formula("SUM(" + col("J") + ")", b.movilizados),
+          formula("IFERROR(ROUND(C" + k + "/B" + k + ",1),0)", Math.round(b.movilizados / cuantos * 10) / 10),
+          formula("SUM(" + col("K") + ")", b.no),
+          formula("COUNTIF(" + col("B") + ",\"SIN DESPACHO\")", b.sd),
+          formula("SUMIF(" + col("B") + ",\"SIN DESPACHO\"," + col("J") + ")", b.sdPersonas),
+          formula("SUM(" + col("O") + ")", b.gestores), b.base || null]);
+      } else {
+        B.poner([b.interno, 0, 0, 0, 0, 0, 0, 0, b.base || null]);
+      }
+      B.pintar(k, 3, COLOR_VAV.verde);
+      if (b.sd) B.pintar(k, 6, COLOR_VAV.rojo);
+    });
+    if (buses.length) {
+      var u = B.ultima, t = B.ultima + 1;
+      var suma = function (c, valor) { return formula("SUM(" + c + "2:" + c + u + ")", valor); };
+      var total = function (campo) { return buses.reduce(function (s, b) { return s + b[campo]; }, 0); };
+      var todos = viajes.length, movilizados = total("movilizados");
+      B.poner(["TODA LA FLOTA", suma("B", todos), suma("C", movilizados),
+        formula("IFERROR(ROUND(C" + t + "/B" + t + ",1),0)", todos ? Math.round(movilizados / todos * 10) / 10 : 0),
+        suma("E", total("no")), suma("F", total("sd")), suma("G", total("sdPersonas")), suma("H", total("gestores")), null],
+        null, true);
+    }
+    B.cerrar();
+
+    // ------------------------------------------------------------------ cómo se lee
+    var N = libro.addWorksheet("Notas");
+    [
+      "Viaje a viaje sacado del Portal de Control, con lo que publica el programa de la tarjeta en Supabase.",
+      "Renglones verdes: cada vez que se abrió la puerta y subió alguien. Renglón azul: el total del viaje (ámbar: sin despacho; rojo: el sensor pasó de " + TOPE + ").",
+      "TARJETA: viene con los pasajeros que el conductor escribió en \"Mi tarjeta\". Si hay un número, aunque sea 0, manda sobre el sensor. Se puede cambiar o borrar y todo se recalcula.",
+      "CONTEO SENSOR: lo que contó la puerta, sin los gestores que subieron con su código y con el tope de " + TOPE + " por viaje.",
+      "No trae la hoja \"Fuera de la ruta\" ni las aperturas de puerta sin viaje (patio, taller, aseo): esas solo salen en el Excel del programa de Python.",
+    ].forEach(function (t) { N.addRow([t]); });
+    N.getColumn(1).width = 120;
+  }
+
+  // Descarga un archivo armado en el navegador.
+  function descargar(blob, nombre) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = nombre;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  }
+
+  // Toda la flota del día, o solo la base escogida (los otros filtros no cuentan: es el informe del día).
+  async function excelViajeAViaje() {
+    var d = state.dia;
+    if (!d.filas || !d.filas.length || d.armandoExcel) return;
+    var fecha = d.fecha;
+    var base = d.conBases ? $("diaBase").value : "";
+    var boton = $("diaExcel");
+    d.armandoExcel = true;
+    boton.disabled = true;
+    boton.textContent = "Armando el Excel…";
+    try {
+      var res = await Promise.all([
+        cargarExcelJS(),
+        traerTodo(function () {
+          return client.from("tarjeta_viajes").select("clave,detalle,cancelado_sonar").eq("dia", fecha).order("clave");
+        }),
+      ]);
+      if (d.fecha !== fecha) return;
+      var extra = {};
+      res[1].forEach(function (x) { extra[x.clave] = x; });
+      var filas = (base ? d.filas.filter(function (f) { return f.base === base; }) : d.filas).slice().sort(function (a, b) {
+        return compararInternos(a.interno, b.interno) || String(a.hora_salida).localeCompare(String(b.hora_salida)) ||
+          String(a.clave).localeCompare(String(b.clave));
+      });
+      var sinViajes = (d.sinViajes || []).filter(function (e) { return !base || e.base === base; });
+      var libro = new res[0].Workbook();
+      libro.creator = "Portal de Control · Combuses";
+      libro.calcProperties.fullCalcOnLoad = true;
+      armarViajeAViaje(libro, filas, extra, sinViajes);
+      var datos = await libro.xlsx.writeBuffer();
+      descargar(new Blob([datos], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+        "viaje_a_viaje_" + fecha + (base ? "_" + base.replace(/\s+/g, "") : "") + ".xlsx");
+    } catch (err) {
+      aviso("No se pudo armar el Excel: " + textoError(err), "mal");
+    } finally {
+      d.armandoExcel = false;
+      boton.textContent = "Excel viaje a viaje";
+      boton.disabled = !(state.dia.filas && state.dia.filas.length);
+    }
+  }
+
   // ================================================================ INFORMES
   function abrirInformes() {
     if (!$("infHasta").value) {
@@ -2096,6 +2380,7 @@
     $("diaDespues").addEventListener("click", function () { location.hash = "#/dia/" + sumarDias(state.dia.fecha, 1); });
     $("diaHoy").addEventListener("click", function () { location.hash = "#/dia/" + diaDeHoy(); });
     $("diaActualizar").addEventListener("click", function () { cargarDia(); });
+    $("diaExcel").addEventListener("click", excelViajeAViaje);
     $("diaBuscar").addEventListener("input", function () { state.dia.buscar = this.value; pintarDia(); });
     $("diaRuta").addEventListener("change", function () { state.dia.ruta = this.value; pintarDia(); });
     $("diaBase").addEventListener("change", function () {

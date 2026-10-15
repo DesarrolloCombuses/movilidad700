@@ -25,7 +25,7 @@ Cuando se publica una versión nueva, arriba sale **"Hay una versión nueva del 
 
 | Sección | Para qué |
 |---|---|
-| **Día** | Todos los buses de un día: viajes, pasajeros y plata del sensor y del conductor, la diferencia, cívicas, tiquetes y qué falta o hay que revisar. Una tabla **por base** con sus totales; al tocar una base queda solo esa. Filtros: con aviso, no cuadran, por revisar, falta algo, sin despacho, por base y por ruta. |
+| **Día** | Todos los buses de un día: viajes, pasajeros y plata del sensor y del conductor, la diferencia, cívicas, tiquetes y qué falta o hay que revisar. Una tabla **por base** con sus totales; al tocar una base queda solo esa. Filtros: con aviso, no cuadran, por revisar, falta algo, sin despacho, por base y por ruta. El botón **Excel viaje a viaje** descarga el día completo como lo arman los auxiliares. |
 | **Tarjeta del bus** | La tarjeta de papel completa, viaje por viaje. Al abrir un viaje se ve **el mapa de su recorrido** y por qué itinerario fue, cada apertura de puerta (hora, suben, bajan, dónde, sensor tapado), quién escribió cada número y sus correcciones, y el daño del validador con su foto. Excel e imprimir con firmas. |
 | **Informes** | Entre dos fechas, agrupado por bus, conductor, ruta, día o base, o de una sola base. Por conductor sale primero el que más plata dice de menos. El Excel trae el resumen, cada viaje, las correcciones, los daños y los avisos de los buses. |
 | **Gestores** | Los celulares de los gestores **por aprobar** (con su selfie) y los aprobados, y lo que leyeron los conductores cada día: qué se restó, qué no y qué es sospechoso. Solo para despachadores. |
@@ -61,6 +61,16 @@ El sensor de la puerta cuenta a los gestores como pasajeros. Ahora el gestor mue
 - **En la tarjeta del bus:** los pasajeros del viaje ya vienen sin los gestores y dicen *"+1 gestor (no cuenta)"*. Al abrir el viaje sale quién subió, a qué hora y dónde, y un punto morado en el mapa.
 
 Sin la versión 8 del SQL, la pestaña lo dice y la tarjeta sale como antes.
+
+### El Excel del viaje a viaje (v0.7.0)
+
+En **Día**, el botón **Excel viaje a viaje** descarga el mismo Excel que arma el programa de Python para los auxiliares (`viaje_a_viaje_<día>.xlsx`), de toda la flota o solo de la base escogida:
+- **Viaje a viaje:** cada vez que se abrió la puerta (hora, entradas, salidas, dirección, conductor; en verde si subió alguien) y debajo **el total del viaje** con fórmulas. Azul es normal, ámbar es sin despacho y rojo es que el sensor pasó de 19.
+- **TARJETA** viene con los pasajeros que el conductor escribió en "Mi tarjeta". Si hay un número, aunque sea 0, manda sobre el sensor en la columna **Combuses**. Se puede escribir en cualquier renglón del viaje, cambiar o borrar, y todo se recalcula.
+- **CONTEO SENSOR** ya va sin los gestores y con el tope de 19, igual que la tarjeta.
+- **Resumen por viaje** y **Resumen por bus**, con TODA LA FLOTA al final.
+
+No trae la hoja **"Fuera de la ruta"** ni las aperturas sin viaje (patio, taller, aseo): Supabase solo guarda cuántas fueron. Esas siguen saliendo en el Excel del programa de Python.
 
 ### Avisos de los buses
 
