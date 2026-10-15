@@ -87,6 +87,7 @@
     ges: { fecha: null, lecturas: null, celulares: null, error: null, cargando: false },
     // Movilidad: la Base de datos de Movilidad 2026 (movilidad.sql: ajustes y archivos planos)
     mov: { desde: null, hasta: null, datos: null, filas: null, error: null, cargando: false, resumenAbierto: false,
+      noRealizados: null, noRealizadosError: null, noRealizadosPromesa: null, noRealizadosAbierto: false,
       entradas: true, salidas: true, tablas: true, cargadoEn: null, armandoExcel: false,
       filtro: { dia: "", base: "", difNeg: false, metro20: false, texto: "", vehiculos: [] } },
     v8: false,
@@ -1818,6 +1819,15 @@
       m.filas = armarMovilidad(m.datos);
       m.error = null;
       m.cargadoEn = Date.now();
+      // Los despachos no realizados se revisan después, con el GPS de los cancelados: la tabla no los espera.
+      m.noRealizados = null;
+      m.noRealizadosError = null;
+      m.noRealizadosPromesa = traerNoRealizados(desde, hasta);
+      m.noRealizadosPromesa.then(function (x) {
+        if (sigue()) { m.noRealizados = x; if (state.vista === "movilidad") pintarNoRealizados(); }
+      }, function (err) {
+        if (sigue()) { m.noRealizadosError = err; if (state.vista === "movilidad") pintarNoRealizados(); }
+      });
     } catch (err) {
       if (sigue()) m.error = err;
     } finally {
@@ -1950,6 +1960,120 @@
   function numMov(x) { return x == null ? "—" : miles(x) === "0" ? "0" : (x < 0 ? "−" : "") + miles(x); }
   function diaSemana(dia) { return DIAS_SEMANA[new Date(dia + "T12:00:00Z").getUTCDay()]; }
   function fechaMov(dia) { var p = dia.split("-"); return p[2] + "/" + p[1] + "/" + p[0]; }   // 14/10/2026, como 700control
+  // ---------------------------------------------------------------- despachos no realizados (15-oct-2026)
+  // Un despacho NO se realizó cuando Sonar lo canceló Y el recorrido GPS muestra que el bus anduvo menos de la
+  // mitad de lo normal de su itinerario (lo decidió el usuario). Que Sonar lo cancele solo no basta: del 1 al 14 de
+  // octubre, 674 de 920 cancelados anduvieron la ruta completa, muchos con gente; y lo que no se canceló siempre la
+  // anduvo. Ejemplo: el 703 del 1-oct, viaje 3, despachado a las 10:32 a. m.: 0 km en 1 minuto, nadie subió, y a las 10:35
+  // lo despacharon otra vez. Siguen contando en Viajes realizados de la movilidad (también lo decidió él): solo se
+  // ven. Los cancelados sin recorrido GPS van aparte: de esos no se sabe.
+  // Los km normales son la mediana de cada itinerario del 1 al 14 de octubre; uno que no esté aquí usa 22 km.
+  var KM_NORMAL = { aeropuertotunelccsandiego: 22, aeropuertotunelexposicionesnutibara: 25, aeropuertoautopistaterminalnorte: 40,
+    almacentrotunelaeropuerto: 22, nutibaraexposicionestunelaeropuerto: 24, terminalnorteautopistaaeropuerto: 39,
+    ccsandiegotunelaeropuerto: 21 };
+  var KM_NORMAL_OTRO = 22;
+  function kmNormal(itinerario) { return KM_NORMAL[String(itinerario || "").toLowerCase().replace(/[^a-z]/g, "")] || KM_NORMAL_OTRO; }
+  // Sube al aeropuerto o baja de él: el nombre del itinerario empieza por donde arranca ("Aeropuerto-Tunel-ccsandiego"
+  // baja; "Almacentro-Tunel-Aeropuerto" sube). Igual que sentido_de en el programa de la oficina.
+  function sentidoDe(itinerario) {
+    var partes = String(itinerario || "").toLowerCase().replace(/_/g, "-").split("-")
+      .map(function (p) { return p.trim(); }).filter(Boolean);
+    if (!partes.length) return "";
+    if (partes[0].indexOf("aeropuerto") >= 0 || partes[0] === "aero" || partes[0] === "aereopuerto") return "bajada";
+    if (partes.slice(1).some(function (p) { return p.indexOf("aeropuerto") >= 0; })) return "subida";
+    return "";
+  }
+  var SENTIDO_TEXTO = { subida: "Sube al aeropuerto", bajada: "Baja del aeropuerto", "": "Sin sentido" };
+  // Los km de un recorrido GPS ([[lat, lon], ...]).
+  function kmDe(puntos) {
+    var t = 0, rad = Math.PI / 180;
+    for (var i = 1; i < puntos.length; i++) {
+      var a = puntos[i - 1], b = puntos[i];
+      var x = (b[1] - a[1]) * rad * Math.cos((a[0] + b[0]) / 2 * rad), y = (b[0] - a[0]) * rad;
+      t += 6371 * Math.sqrt(x * x + y * y);
+    }
+    return t;
+  }
+  function kmTexto(km) { return km == null ? "—" : (Math.round(km * 10) / 10).toFixed(1).replace(".", ","); }
+
+  // Los cancelados en Sonar del rango, con su recorrido GPS: { lista: no realizados, sinGps: cancelados sin recorrido }.
+  async function traerNoRealizados(desde, hasta) {
+    var cancelados = await traerTodo(function () {
+      return client.from("tarjeta_viajes").select("clave,dia,interno,viaje_n,itinerario,despacho_en,llego_en,subidas,bajadas")
+        .gte("dia", desde).lte("dia", hasta).eq("cancelado_sonar", true).eq("sin_despacho", false).order("clave");
+    });
+    var recorridos = {};
+    for (var i = 0; i < cancelados.length; i += 100) {
+      var claves = cancelados.slice(i, i + 100).map(function (x) { return x.clave; });
+      var r = await conTiempo(client.from("tarjeta_recorridos").select("clave,recorrido").in("clave", claves));
+      if (r.error) throw r.error;
+      (r.data || []).forEach(function (x) { recorridos[x.clave] = x.recorrido; });
+    }
+    var lista = [], sinGps = [];
+    cancelados.forEach(function (x) {
+      if (x.interno === "PRUEBA") return;
+      var d = {
+        clave: x.clave, dia: x.dia, interno: String(x.interno).trim(), viaje: x.viaje_n, despacho_en: x.despacho_en,
+        itinerario: x.itinerario || "", sentido: sentidoDe(x.itinerario), subidas: n(x.subidas), bajadas: n(x.bajadas),
+        kmNormal: kmNormal(x.itinerario), km: recorridos[x.clave] ? kmDe(leerPolilinea(recorridos[x.clave])) : null,
+        minutos: x.llego_en ? Math.round((Date.parse(x.llego_en) - Date.parse(x.despacho_en)) / 60000) : null,
+      };
+      if (d.km == null) sinGps.push(d);
+      else if (d.km < d.kmNormal / 2) lista.push(d);
+    });
+    function orden(a, b) { return a.dia < b.dia ? -1 : a.dia > b.dia ? 1 : Date.parse(a.despacho_en) - Date.parse(b.despacho_en); }
+    return { lista: lista.sort(orden), sinGps: sinGps.sort(orden) };
+  }
+
+  function pintarNoRealizados() {
+    var m = state.mov, caja = $("movNoRealizados");
+    if (!m.filas || !m.filas.length || rangoMovilidadMalo(m)) { caja.innerHTML = ""; return; }
+    if (m.noRealizadosError) {
+      caja.innerHTML = '<p class="aviso-programa">No se pudo revisar qué despachos no se realizaron: ' + esc(textoError(m.noRealizadosError)) + "</p>";
+      return;
+    }
+    var nr = m.noRealizados;
+    if (!nr) { caja.innerHTML = '<p class="pie">Revisando con el GPS qué despachos no se realizaron…</p>'; return; }
+    var f = m.filtro;
+    function pasa(d) { return (!f.dia || d.dia === f.dia) && (!f.vehiculos.length || f.vehiculos.indexOf(d.interno) >= 0); }
+    var lista = nr.lista.filter(pasa), sinGps = nr.sinGps.filter(pasa);
+    var dias = {};
+    function dia(d) { return dias[d] || (dias[d] = { subida: 0, bajada: 0, otro: 0, sinGps: 0 }); }
+    lista.forEach(function (d) { dia(d.dia)[d.sentido === "subida" || d.sentido === "bajada" ? d.sentido : "otro"]++; });
+    sinGps.forEach(function (d) { dia(d.dia).sinGps++; });
+    var sube = lista.filter(function (d) { return d.sentido === "subida"; }).length;
+    var baja = lista.filter(function (d) { return d.sentido === "bajada"; }).length;
+    var html = '<details class="mov-resumen" id="movNoRealizadosDet"' + (m.noRealizadosAbierto ? " open" : "") + "><summary>" +
+      "Despachos no realizados: " + miles(lista.length) + " (" + miles(sube) + " suben al aeropuerto, " + miles(baja) + " bajan)" +
+      (f.dia ? " · " + esc(fechaCorta(f.dia)) : "") + "</summary>" +
+      '<p class="nota">Sonar los canceló y el GPS muestra que el bus anduvo menos de la mitad de lo normal de esa ruta: el despacho no ' +
+        "se hizo. Siguen contando en Viajes realizados de la movilidad." +
+        (sinGps.length ? " Al final van " + sinGps.length + " cancelados más que no tienen recorrido GPS: de esos no se sabe." : "") + "</p>";
+    var orden = Object.keys(dias).sort();
+    if (!orden.length) {
+      html += '<p class="vacio">Ningún despacho sin realizar' + (f.dia ? " ese día" : " en esas fechas") + ".</p></details>";
+      caja.innerHTML = html;
+      return;
+    }
+    html += '<div class="tabla-caja"><table class="tabla-mov-dias"><thead><tr><th>Día</th><th class="n">No realizados</th>' +
+      '<th class="n">Suben al aeropuerto</th><th class="n">Bajan del aeropuerto</th><th class="n">Cancelados sin GPS</th></tr></thead><tbody>' +
+      orden.map(function (k) {
+        var x = dias[k];
+        return "<tr><td><strong>" + esc(fechaCorta(k)) + '</strong><span class="menor">' + esc(diaSemana(k)) + '</span></td><td class="n"><strong>' +
+          (x.subida + x.bajada + x.otro) + '</strong></td><td class="n">' + x.subida + '</td><td class="n">' + x.bajada + '</td><td class="n">' + x.sinGps + "</td></tr>";
+      }).join("") + "</tbody></table></div>" +
+      '<div class="tabla-caja tabla-no-realizados"><table><thead><tr><th>Día</th><th>Bus</th><th class="n">Viaje</th><th>Despacho</th>' +
+      '<th>Itinerario</th><th>Sentido</th><th class="n">Anduvo</th><th class="n">Duró</th><th class="n">Subieron</th><th class="n">Bajaron</th></tr></thead><tbody>' +
+      lista.concat(sinGps).map(function (d) {
+        return "<tr" + (d.km == null ? ' class="apagado"' : "") + "><td>" + esc(fechaMov(d.dia)) + '</td><td><a class="bus-num" href="#/bus/' +
+          encodeURIComponent(d.interno) + "/" + d.dia + '">' + esc(d.interno) + '</a></td><td class="n">' + (d.viaje == null ? "—" : d.viaje) +
+          "</td><td>" + esc(hora(d.despacho_en)) + "</td><td>" + esc(rutaLegible(d.itinerario) || "—") + "</td><td>" + esc(SENTIDO_TEXTO[d.sentido]) +
+          '</td><td class="n">' + (d.km == null ? "Sin GPS" : kmTexto(d.km) + " de " + d.kmNormal + " km") + '</td><td class="n">' +
+          (d.minutos == null ? "—" : d.minutos + " min") + '</td><td class="n">' + d.subidas + '</td><td class="n">' + d.bajadas + "</td></tr>";
+      }).join("") + "</tbody></table></div></details>";
+    caja.innerHTML = html;
+  }
+
   function filtroMovVacio() { return { dia: "", base: "", difNeg: false, metro20: false, texto: "", vehiculos: [] }; }
 
   // Lo que dejan ver los filtros, como en 700control: día, base, Dif < 0, Metro > 20, el texto y los vehículos.
@@ -1994,6 +2118,7 @@
       cuerpo.innerHTML = malo ? '<p class="vacio">' + esc(malo) + "</p>"
         : m.error ? cajaError("No se pudo traer la movilidad: " + textoError(m.error), "recargar-movilidad")
         : '<p class="cargando">Trayendo los viajes y los buses de esos días…</p>';
+      pintarNoRealizados();
       return;
     }
     $("movExcel").disabled = !m.filas.length;
@@ -2041,6 +2166,7 @@
     cuerpo.innerHTML = html;
     pintarFiltrosMov(dias);
     pintarTablaMov();
+    pintarNoRealizados();
   }
 
   function pintarFiltrosMov(dias) {
@@ -2652,6 +2778,18 @@
       libro.calcProperties.fullCalcOnLoad = true;
       hojaBaseDeDatos(libro, m.filas);
       hojaResumenMovilidad(libro, m.filas);
+      // Los despachos no realizados (si todavía se estaban revisando con el GPS, se esperan)
+      var nr = await (m.noRealizadosPromesa || Promise.resolve(null)).catch(function () { return null; });
+      var NR = hojaVaV(libro, "Despachos no realizados", ["Día", "Bus", "Viaje", "Despacho", "Itinerario", "Sentido",
+        "Km que anduvo", "Km normal de la ruta", "Minutos", "Subieron", "Bajaron", "Resultado"]);
+      if (!nr) NR.poner(["No se pudo revisar con el GPS"]);
+      else if (!nr.lista.length && !nr.sinGps.length) NR.poner(["Ninguno entre esas fechas"]);
+      else nr.lista.concat(nr.sinGps).forEach(function (d) {
+        NR.poner([d.dia, d.interno, d.viaje, hora(d.despacho_en), d.itinerario, SENTIDO_TEXTO[d.sentido],
+          d.km == null ? null : Math.round(d.km * 10) / 10, d.kmNormal, d.minutos, d.subidas, d.bajadas,
+          d.km == null ? "Cancelado sin GPS: no se sabe" : "No realizado"]);
+      });
+      NR.cerrar();
       var A = hojaVaV(libro, "Ajustes", ["Día", "Bus", "Cantidad", "Motivo", "Nota", "Escribió", "Cuándo", "Anulado"]);
       var ajustes = m.datos.ajustes || [];
       if (!ajustes.length) A.poner(["Ninguno entre esas fechas"]);
@@ -2677,6 +2815,7 @@
         "Pasajeros metro: los usos de la tarjeta Mifare (cívica) de ese bus, de la plantilla metro (fecha, vehiculo, total) o de los archivos de la liquidación. Cada archivo del Mifare va al día de su nombre, como en la plantilla (el \"01-10\" es el 1 de octubre), y la placa se pasa a bus con las placas de Sonar. Se restan de los ingresos y de las salidas; si el día no tiene Metro cargado, va vacío y no resta.",
         "El bus va como texto y con un espacio al final (\"703 \"), menos el 710 y el 756, igual que en Movilidad 2026.",
         "La hoja Resumen por día suma la Base de datos con fórmulas.",
+        "Despachos no realizados: Sonar los canceló y el GPS muestra que el bus anduvo menos de la mitad de lo normal de esa ruta. Sube o baja dice si iba para el aeropuerto o venía de él. Siguen contando en Viajes realizados. Los cancelados sin recorrido GPS van al final: de esos no se sabe.",
       ].forEach(function (t) { N.addRow([t]); });
       N.getColumn(1).width = 140;
       var datos = await libro.xlsx.writeBuffer();
@@ -3466,6 +3605,9 @@
     $("movLimpiar").addEventListener("click", function () { state.mov.filtro = filtroMovVacio(); pintarMovilidad(); });
     $("movCuerpo").addEventListener("toggle", function (ev) {
       if (ev.target.id === "movResumen") state.mov.resumenAbierto = ev.target.open;
+    }, true);
+    $("movNoRealizados").addEventListener("toggle", function (ev) {
+      if (ev.target.id === "movNoRealizadosDet") state.mov.noRealizadosAbierto = ev.target.open;
     }, true);
 
     // Clics dentro de las tablas y la tarjeta

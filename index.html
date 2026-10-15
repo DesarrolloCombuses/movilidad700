@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./css/control.css?v=0.9.3">
+  <link rel="stylesheet" href="./css/control.css?v=0.9.4">
 </head>
 <body>
 
@@ -215,7 +215,19 @@
           <p>También recibe los archivos <em>LiquidacionUsosTransporteMifare</em> tal como llegan, sueltos o en el .zip. Cada uno va al día de su nombre,
             y la placa se pasa a número de bus con las placas de Sonar.</p>
 
-          <h3>3. Ajustes y Excel</h3>
+          <h3>3. Despachos no realizados</h3>
+          <p>Arriba de la tabla, en <strong>Despachos no realizados</strong>, salen por día los despachos que no se hicieron y en qué sentido:
+            <strong>sube al aeropuerto</strong> o <strong>baja del aeropuerto</strong> (lo dice el itinerario: "Aeropuerto-…" baja, "…-Aeropuerto" sube).</p>
+          <ul>
+            <li>Un despacho <strong>no se realizó</strong> cuando Sonar lo canceló <strong>y</strong> el GPS muestra que el bus anduvo menos de la mitad de lo normal de esa ruta.
+              Ejemplo: el 703 del 1 de octubre, viaje 3, despachado a las 10:32 a. m.: anduvo 0 km en 1 minuto, nadie subió, y a las 10:35 lo despacharon otra vez.</li>
+            <li>Que Sonar lo cancele no basta: la mayoría de los cancelados sí hicieron la ruta, muchos con gente.</li>
+            <li>Los cancelados que no tienen recorrido GPS van al final, en gris: de esos no se sabe.</li>
+            <li>Siguen contando en <strong>Viajes realizados</strong> de la movilidad: aquí solo se ven. Con el filtro de día o de vehículos, la lista también se filtra.</li>
+            <li>El Excel los trae en la hoja <em>Despachos no realizados</em>.</li>
+          </ul>
+
+          <h3>4. Ajustes y Excel</h3>
           <ul>
             <li><strong>+ Ajuste</strong> en el renglón del bus (solo despachadores): cuántas personas y el motivo (Taller, Administrativo, Despachador, u Otro con una nota).
               No se borra: se anula diciendo el porqué, y queda quién y cuándo.</li>
@@ -235,6 +247,7 @@
         <input id="movMifareArchivo" type="file" accept=".xlsx,.xls,.zip" multiple hidden>
       </form>
       <div id="movCuerpo"></div>
+      <div id="movNoRealizados"></div>
       <div id="movFiltros" class="filtros" hidden>
         <select id="movDia" aria-label="Día"><option value="">Todos los días</option></select>
         <select id="movBase" aria-label="Base"><option value="">Todas las bases</option></select>
@@ -291,7 +304,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="./js/control-config.js?v=0.9.3"></script>
-<script src="./js/control.js?v=0.9.3"></script>
+<script src="./js/control-config.js?v=0.9.4"></script>
+<script src="./js/control.js?v=0.9.4"></script>
 </body>
 </html>

@@ -73,7 +73,7 @@ En **Día**, el botón **Excel viaje a viaje** descarga el mismo Excel que arma 
 
 No trae la hoja **"Fuera de la ruta"** ni las aperturas sin viaje (patio, taller, aseo): Supabase solo guarda cuántas fueron. Esas siguen saliendo en el Excel del programa de Python.
 
-### La movilidad (v0.9.3, movilidad.sql versión 2)
+### La movilidad (v0.9.4, movilidad.sql versión 2)
 
 Hasta agosto, la "Base de datos" de Movilidad 2026 se armaba con la plantilla [700control](https://github.com/DesarrolloCombuses/700control) (el archivo de Sonar, el del Metro y el de ajustes). Ahora sale sola en **Movilidad**, de lo que publica el programa de la tarjeta, **con la regla de 700control**, el Descuento>20 en cero, y restando el Metro y 2 por viaje (15-oct-2026):
 
@@ -92,6 +92,7 @@ Hasta agosto, la "Base de datos" de Movilidad 2026 se armaba con la plantilla [7
 | **Pasajeros metro** | Los usos de la tarjeta Mifare (cívica) de cada bus: de la **plantilla metro** (fecha, vehiculo, total) o de los archivos *LiquidacionUsosTransporteMifare*. En los días con Metro cargado, el bus sin usos va en 0; el día sin Metro va vacío y no resta. Se resta de los ingresos y de las salidas. |
 
 - **La ayuda** (arriba, plegada: "¿Cómo funciona la movilidad y cómo se carga el Metro?") explica en la misma pantalla cómo sale cada número, con el ejemplo del 703 del 1 de octubre, cómo armar y cargar la plantilla metro, cómo cruza y qué quiere decir cada aviso.
+- **Despachos no realizados** (arriba de la tabla, plegado; 15-oct-2026): por día, cuántos despachos no se hicieron y en qué sentido (**sube al aeropuerto** o **baja del aeropuerto**, por el nombre del itinerario), y la lista con el bus, el viaje, la hora, los km que anduvo y cuánto duró. Un despacho **no se realizó** cuando Sonar lo canceló **y** su recorrido GPS (tarjeta_recorridos) anduvo menos de la mitad de lo normal de esa ruta (`KM_NORMAL` en control.js: la mediana de cada itinerario del 1 al 14 de octubre). Solo cancelado no basta: del 1 al 14 de octubre, 674 de 920 cancelados hicieron la ruta completa. Ejemplo: el 703 del 1-oct, viaje 3, a las 10:32 a. m.: 0 km en 1 minuto. Del 1 al 14 de octubre fueron 164 (110 suben, 54 bajan), y 55 cancelados no tienen GPS (van aparte: no se sabe). **Siguen contando en Viajes realizados**: solo se ven. El Excel los trae en la hoja *Despachos no realizados*.
 - **La pantalla** es la Base de datos: las mismas columnas del Excel, en el mismo orden, con la fila de totales abajo. Se filtra como en 700control: por **día**, **base**, **Dif < 0**, **Metro > 20**, texto y **vehículos**. Arriba van los totales y el **Resumen por día** (tocar un día deja solo ese día).
 - **Escribir un ajuste:** en el renglón del bus, **+ Ajuste**: cuántas personas y el motivo. No se borra: se **anula** con el porqué, y queda quién y cuándo.
 - **Cargar Metro** (solo despachadores). Antes de guardar muestra qué día, cuántos usos y cuántos buses trae cada archivo, y avisa si un bus no está en Sonar ese día o tiene Metro un día en que no hizo viajes. Recibe (15-oct-2026):

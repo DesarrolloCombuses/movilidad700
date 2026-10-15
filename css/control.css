@@ -361,6 +361,8 @@ tr.detalle-fila > td { padding: 0; background: var(--panel-2); }
 /* ---------------------------------------------------------------- movilidad (movilidad.sql) */
 .mov-resumen { margin-bottom: 14px; }
 .mov-resumen > summary { cursor: pointer; font-weight: 750; padding: 6px 0 10px; }
+.tabla-no-realizados { margin-top: 10px; }
+.tabla-no-realizados td { white-space: nowrap; }
 /* la ayuda de la movilidad */
 .mov-ayuda { margin: 0 0 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
 .mov-ayuda > summary { cursor: pointer; font-weight: 750; padding: 12px 16px; color: var(--primary); }
