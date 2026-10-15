@@ -73,7 +73,7 @@ En **Día**, el botón **Excel viaje a viaje** descarga el mismo Excel que arma 
 
 No trae la hoja **"Fuera de la ruta"** ni las aperturas sin viaje (patio, taller, aseo): Supabase solo guarda cuántas fueron. Esas siguen saliendo en el Excel del programa de Python.
 
-### La movilidad (v0.9.1, movilidad.sql versión 2)
+### La movilidad (v0.9.2, movilidad.sql versión 2)
 
 Hasta agosto, la "Base de datos" de Movilidad 2026 se armaba con la plantilla [700control](https://github.com/DesarrolloCombuses/700control) (el archivo de Sonar, el del Metro y el de ajustes). Ahora sale sola en **Movilidad**, de lo que publica el programa de la tarjeta, **con la regla de 700control**, el Descuento>20 en cero, y restando el Metro y 2 por viaje (15-oct-2026):
 
@@ -89,14 +89,14 @@ Hasta agosto, la "Base de datos" de Movilidad 2026 se armaba con la plantilla [7
 | **Dif** | Ingresos totales − Total salidas. En rojo cuando pasa de 30, como en el Excel. |
 | **Viajes realizados** | Los viajes **con despacho**. Los sin despacho Sonar los pone como "sin ruta": su gente suma en Sonar, pero no restan (así coincide con la movilidad del 1 al 5 de octubre hecha con 700control). |
 | **Observaciones** | Los motivos de los ajustes, en el orden del Excel ("Taller - Administrativo - Despachador"), "Gestor", "Corrección de control" y "No laboró" si no hizo viajes. |
-| **Pasajeros metro** | Los usos de la tarjeta Mifare (cívica) de cada bus, de los archivos *LiquidacionUsosTransporteMifare*. En los días con archivo cargado, el bus sin usos va en 0; el día sin archivo va vacío y no resta. Se resta de los ingresos y de las salidas. |
+| **Pasajeros metro** | Los usos de la tarjeta Mifare (cívica) de cada bus: de la **plantilla metro** (fecha, vehiculo, total) o de los archivos *LiquidacionUsosTransporteMifare*. En los días con Metro cargado, el bus sin usos va en 0; el día sin Metro va vacío y no resta. Se resta de los ingresos y de las salidas. |
 
 - **La pantalla** es la Base de datos: las mismas columnas del Excel, en el mismo orden, con la fila de totales abajo. Se filtra como en 700control: por **día**, **base**, **Dif < 0**, **Metro > 20**, texto y **vehículos**. Arriba van los totales y el **Resumen por día** (tocar un día deja solo ese día).
 - **Escribir un ajuste:** en el renglón del bus, **+ Ajuste**: cuántas personas y el motivo. No se borra: se **anula** con el porqué, y queda quién y cuándo.
-- **Cargar Mifare** (solo despachadores): uno o varios `LiquidacionUsosTransporteMifare DD-MM-AAAA.xlsx`, o el `.zip` con todos. Muestra antes de guardar qué día, cuántos usos y cuántos buses trae cada archivo. Reglas (15-oct-2026):
-  - cada archivo va al **día en que se usaron** los pasajes, el que dice "Fecha de Uso de": el "01-10" trae del 30-sep 2:30 a. m. al 01-oct 2:29 a. m. (el nombre es el día de la liquidación), y eso es el **30 de septiembre**, igual que el día de Sonar;
-  - la placa (*Equipo*) se pasa a número de bus con **las placas de Sonar**: la tabla de los archivos tenía cambiados 708 con 757 y 723 con 751;
-  - cargar otra vez un día lo reemplaza: el bus que ya no sale en el archivo queda en 0.
+- **Cargar Metro** (solo despachadores). Antes de guardar muestra qué día, cuántos usos y cuántos buses trae cada archivo, y avisa si un bus no está en Sonar ese día o tiene Metro un día en que no hizo viajes. Recibe (15-oct-2026):
+  - **la plantilla metro**: una hoja con las columnas `fecha`, `vehiculo` y `total`, un renglón por bus y día (pueden ir varios días). Se guarda **tal cual**: la fecha es el día de la movilidad. Si un renglón no tiene bien la fecha, el vehículo o el total, no se carga nada de ese archivo y dice cuál renglón es;
+  - o los archivos `LiquidacionUsosTransporteMifare DD-MM-AAAA.xlsx`, sueltos o en el `.zip`. Cada uno va al **día de su nombre**, como en la plantilla: el "01-10" (usos del 30-sep 2:30 a. m. al 01-oct 2:29 a. m.) es el **1 de octubre**. La placa (*Equipo*) se pasa a número de bus con **las placas de Sonar** (la tabla de los archivos tenía cambiados 708 con 757 y 723 con 751);
+  - cargar otra vez un día lo reemplaza: el bus que ya no sale queda en 0.
 - **Descargar Excel:** la hoja *Base de datos* igual a la de Movilidad 2026: las 25 columnas en el mismo orden, los mismos anchos y colores del encabezado, el filtro y la Dif en rojo. El bus va como texto con un espacio al final ("703 "), menos el 710 y el 756, como en el maestro. **Van con fórmula** Ingresos totales (`=U-R-Q-2*V-N`), Total salidas (`=D+E-Q-2*V-N`) y Dif (`=B-F`): si en el Excel cambian un ajuste, el Metro o los viajes, se recalcula. Trae también *Resumen por día* (con `SUMAR.SI.CONJUNTO` sobre la Base de datos), *Ajustes* (con quién y cuándo) y *Notas*.
 - Hace falta `almacentro/enturnes/sql/movilidad.sql` **versión 2** en Supabase. Con la versión 1, Salidas P1 sale solo con lo que bajó en los viajes y la pestaña lo avisa; sin ninguna, no hay ajustes y Sonar sale solo con lo de los viajes.
 

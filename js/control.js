@@ -1706,7 +1706,7 @@
   //                       + lo que control corrigió en un viaje
   //   Ingresos totales  = Sonar - Descuento>20 - Pasajeros metro - 2 x Viajes realizados - Ajustes
   //   Viajes realizados = los viajes con despacho (los sin despacho suman en Sonar, pero no restan)
-  //   Pasajeros metro   = los usos del Mifare de ese bus (Cargar Mifare, más abajo)
+  //   Pasajeros metro   = los usos del Mifare de ese bus (Cargar Metro: la plantilla metro o los archivos, más abajo)
   //   Salidas P1       = lo que contó bajando en los viajes + lo que bajó fuera de ellos;   Salidas P2 = 0
   //   Total salidas     = Salidas P1 + Salidas P2 - Pasajeros metro - 2 x Viajes realizados - Ajustes
   //   Dif               = Ingresos - Total salidas
@@ -2142,20 +2142,23 @@
       });
   }
 
-  // ---------------------------------------------------------------- el Metro: los archivos del Mifare
-  // LiquidacionUsosTransporteMifare DD-MM-AAAA.xlsx (uno por día, o varios en un .zip), hoja "Liquidación Usos
-  // Transporte": un renglón por equipo (la placa del bus) y tipo de recorrido, con su "Total Cantidad", y arriba los
-  // tipos de usuario (adulto mayor, frecuentes, metro estándar...). Decidido el 15-oct-2026:
-  //   - cada archivo va al DÍA EN QUE SE USARON los pasajes, el que dice "Fecha de Uso de ...": el "01-10" trae del
-  //     30-sep 2:30 a. m. al 01-oct 2:29 a. m. (el nombre es el día de la liquidación), y eso es el 30-sep de Sonar;
-  //   - la placa se pasa a número de bus con las placas de Sonar (la tabla de los archivos tenía cambiados 708 con
-  //     757 y 723 con 751: el 757 no trabajó el 9 ni el 10 de octubre y "su" placa tuvo usos).
-  // Cargar otra vez el mismo día lo reemplaza: el bus que ya no sale en el archivo queda en 0.
+  // ---------------------------------------------------------------- el Metro: la plantilla o los archivos del Mifare
+  // Dos formas de cargar los Pasajeros metro (15-oct-2026):
+  //   - LA PLANTILLA METRO (la que armó el usuario): una hoja con las columnas fecha, vehiculo y total, un renglón por
+  //     bus y día. Se guarda tal cual: la fecha es el día de la movilidad y el vehículo es el número del bus.
+  //   - Los LiquidacionUsosTransporteMifare DD-MM-AAAA.xlsx (uno por día, o varios en un .zip), hoja "Liquidación Usos
+  //     Transporte": un renglón por equipo (la placa del bus) y tipo de recorrido, con su "Total Cantidad". Van al día
+  //     del nombre, como en la plantilla: el "01-10" (usos del 30-sep 2:30 a. m. al 01-oct 2:29 a. m.) es el 1 de
+  //     octubre. La placa se pasa a bus con las placas de Sonar (la tabla de los archivos tenía cambiados 708 con 757
+  //     y 723 con 751: el 757 no trabajó el 9 ni el 10 de octubre y "su" placa tuvo usos).
+  // Cargar otra vez el mismo día lo reemplaza: el bus que ya no sale queda en 0.
   function numeroMifare(x) { var v = Number(x); return isFinite(v) ? v : 0; }
   function textoCelda(c) { return String(c == null ? "" : c).trim(); }
+  function sinTildes(c) { return textoCelda(c).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, ""); }
+  function dosCifras(x) { return ("0" + x).slice(-2); }
 
-  function leerMifare(bytes) {
-    var libro = XLSX.read(bytes, { type: "array" });
+  // La liquidación del Mifare; null si el libro no la tiene.
+  function leerMifare(libro) {
     var filas = null, iCab = -1;
     libro.SheetNames.some(function (nombre) {
       var f = XLSX.utils.sheet_to_json(libro.Sheets[nombre], { header: 1, defval: null, raw: true });
@@ -2168,11 +2171,15 @@
       iCab = i;
       return true;
     });
-    if (!filas) throw new Error("no tiene la hoja de la liquidación (con Equipo y Total Cantidad)");
+    if (!filas) return null;
     var arriba = filas.slice(0, iCab).map(function (r) { return (r || []).map(textoCelda).join(" "); }).join(" ").replace(/\s+/g, " ");
     var m = /Fecha de Uso de (\d{1,2})\/(\d{1,2})\/(\d{4})/i.exec(arriba);
     if (!m) throw new Error("no dice de qué fecha son los usos (\"Fecha de Uso de ...\")");
     var rango = (/Fecha de Uso de \S+ \S+ a \S+ \S+/i.exec(arriba) || [m[0]])[0];
+    // El día de la movilidad es el del final del rango (el del nombre del archivo), como en la plantilla metro.
+    var fin = /Fecha de Uso de \S+(?: \S+)? a (\d{1,2})\/(\d{1,2})\/(\d{4})/i.exec(arriba);
+    var dia = fin ? fin[3] + "-" + dosCifras(fin[2]) + "-" + dosCifras(fin[1])
+      : sumarDias(m[3] + "-" + dosCifras(m[2]) + "-" + dosCifras(m[1]), 1);
     var cab = filas[iCab].map(textoCelda);
     var arribaCab = filas[iCab - 1] || [];
     var iEq = cab.indexOf("Equipo"), iTot = cab.indexOf("Total Cantidad"), iEmp = cab.indexOf("Empresa"), iVal = cab.indexOf("Total Valor");
@@ -2190,15 +2197,67 @@
       if (iVal >= 0) p.valor += numeroMifare(r[iVal]);
       tipos.forEach(function (t) { var x = numeroMifare(r[t.j]); if (x) p.tipos[t.nombre] = (p.tipos[t.nombre] || 0) + x; });
     });
-    return { dia: m[3] + "-" + ("0" + m[2]).slice(-2) + "-" + ("0" + m[1]).slice(-2), rango: rango, por: por, total: total };
+    return { dia: dia, rango: rango, por: por, total: total };
+  }
+
+  // La fecha de la plantilla: fecha de Excel (número), o texto dd/mm/aaaa o aaaa-mm-dd.
+  function diaDePlantilla(v) {
+    if (typeof v === "number" && v > 20000 && v < 80000) return new Date(Math.round((v - 25569) * 86400000)).toISOString().slice(0, 10);
+    var t = textoCelda(v), m;
+    if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(t))) return m[1] + "-" + dosCifras(m[2]) + "-" + dosCifras(m[3]);
+    if ((m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4}|\d{2})$/.exec(t))) return (m[3].length === 2 ? "20" + m[3] : m[3]) + "-" + dosCifras(m[2]) + "-" + dosCifras(m[1]);
+    return null;
+  }
+
+  // La plantilla metro: la hoja que tenga en un mismo renglón fecha, vehiculo y total; null si el libro no la tiene.
+  // Si un renglón no tiene bien la fecha, el vehículo o el total, no se carga nada del archivo (se diría que el bus
+  // tuvo 0).
+  function leerPlantillaMetro(libro) {
+    var res = null;
+    libro.SheetNames.some(function (nombre) {
+      var f = XLSX.utils.sheet_to_json(libro.Sheets[nombre], { header: 1, defval: null, raw: true });
+      for (var i = 0; i < Math.min(f.length, 15); i++) {
+        var cab = (f[i] || []).map(sinTildes);
+        var iF = cab.indexOf("fecha"), iV = cab.indexOf("vehiculo"), iT = cab.indexOf("total");
+        if (iF < 0 || iV < 0 || iT < 0) continue;
+        var dias = {}, malos = [];
+        f.slice(i + 1).forEach(function (r, j) {
+          r = r || [];
+          var bus = textoCelda(r[iV]).replace(/\.0+$/, "");
+          if (!bus && r[iF] == null && r[iT] == null) return;     // renglón vacío
+          var dia = diaDePlantilla(r[iF]), c = Number(r[iT]);
+          if (!dia || !bus || r[iT] == null || textoCelda(r[iT]) === "" || !isFinite(c) || c < 0) { malos.push(i + j + 2); return; }
+          var d = dias[dia] || (dias[dia] = { por: {}, total: 0 });
+          d.por[bus] = (d.por[bus] || 0) + c;
+          d.total += c;
+        });
+        res = { hoja: nombre, dias: dias, malos: malos };
+        return true;
+      }
+      return false;
+    });
+    return res;
   }
 
   // Los .xlsx sueltos y los que vengan dentro de un .zip (la herramienta del Excel también abre el zip).
-  async function leerArchivosMifare(lista) {
+  async function leerArchivosMetro(lista) {
     var leidos = [], errores = [];
     function uno(nombre, bytes) {
       try {
-        leidos.push(Object.assign({ archivo: nombre }, leerMifare(bytes)));
+        var libro = XLSX.read(bytes, { type: "array" });
+        var x = leerMifare(libro);
+        if (x) { leidos.push(Object.assign({ archivo: nombre }, x)); return; }
+        var p = leerPlantillaMetro(libro);
+        if (!p) throw new Error("no es la plantilla metro (fecha, vehiculo, total) ni la liquidación del Mifare (con Equipo y Total Cantidad)");
+        if (p.malos.length) {
+          throw new Error("en la plantilla, " + (p.malos.length === 1 ? "el renglón " : "los renglones ") + p.malos.slice(0, 8).join(", ") +
+            (p.malos.length > 8 ? "…" : "") + " no tienen bien la fecha, el vehículo o el total. Corríjalos y vuelva a cargarla");
+        }
+        var dias = Object.keys(p.dias).sort();
+        if (!dias.length) throw new Error("la plantilla no trae renglones");
+        dias.forEach(function (dia) {
+          leidos.push({ archivo: nombre, dia: dia, rango: "Plantilla metro", plantilla: true, porBus: p.dias[dia].por, total: p.dias[dia].total });
+        });
       } catch (err) {
         errores.push(nombre + ": " + (err.message || err));
       }
@@ -2222,89 +2281,117 @@
     return { leidos: leidos, errores: errores };
   }
 
-  // placa -> bus con las placas de Sonar (tarjeta_buses_dia), la del día más cercano.
-  async function placasDeSonar(dias) {
+  // Lo que Sonar sabe de esos días (tarjeta_buses_dia): placa -> bus (la del día más cercano) y los viajes de cada bus.
+  async function sonarDeLosDias(dias) {
     var desde = sumarDias(dias[0], -20), hasta = sumarDias(dias[dias.length - 1], 20);
     var filas = await traerTodo(function () {
-      return client.from("tarjeta_buses_dia").select("dia,interno,placa").gte("dia", desde).lte("dia", hasta).order("dia").order("interno");
+      return client.from("tarjeta_buses_dia").select("dia,interno,placa,viajes").gte("dia", desde).lte("dia", hasta).order("dia").order("interno");
     });
-    var porPlaca = {};
+    var porPlaca = {}, viajes = {}, publicado = {};
     filas.forEach(function (f) {
-      if (!f.placa || f.interno === "PRUEBA") return;
+      if (f.interno === "PRUEBA") return;
+      var interno = textoCelda(f.interno);
+      viajes[f.dia + "|" + interno] = n(f.viajes);
+      publicado[f.dia] = true;
+      if (!f.placa) return;
       var p = textoCelda(f.placa).toUpperCase();
-      (porPlaca[p] = porPlaca[p] || []).push({ dia: f.dia, interno: textoCelda(f.interno) });
+      (porPlaca[p] = porPlaca[p] || []).push({ dia: f.dia, interno: interno });
     });
-    return function (placa, dia) {
-      var mejor = null, lejos = Infinity;
-      (porPlaca[placa] || []).forEach(function (x) {
-        var d = Math.abs(diasEntre(x.dia, dia));
-        if (d < lejos) { lejos = d; mejor = x.interno; }
-      });
-      return mejor;
+    return {
+      bus: function (placa, dia) {
+        var mejor = null, lejos = Infinity;
+        (porPlaca[placa] || []).forEach(function (x) {
+          var d = Math.abs(diasEntre(x.dia, dia));
+          if (d < lejos) { lejos = d; mejor = x.interno; }
+        });
+        return mejor;
+      },
+      // null: el bus no está en Sonar ese día (o el día todavía no se ha publicado)
+      viajes: function (interno, dia) { var k = dia + "|" + interno; return k in viajes ? viajes[k] : null; },
+      publicado: function (dia) { return !!publicado[dia]; },
     };
   }
 
-  async function cargarMifare(lista) {
+  async function cargarMetro(lista) {
     if (!window.XLSX) return aviso("No cargó la herramienta del Excel. Revise el internet y recargue.", "mal");
     var boton = $("movMifare");
     boton.disabled = true;
     boton.textContent = "Leyendo los archivos…";
     try {
-      var r = await leerArchivosMifare(lista);
+      var r = await leerArchivosMetro(lista);
       var porDia = {}, errores = r.errores.slice();
       r.leidos.sort(function (a, b) { return a.archivo.localeCompare(b.archivo); }).forEach(function (x) {
-        if (porDia[x.dia]) errores.push(x.archivo + ": es del mismo día que " + porDia[x.dia].archivo + " (se deja el primero)");
+        if (porDia[x.dia]) errores.push(x.archivo + ": el " + fechaCorta(x.dia) + " ya viene en " + porDia[x.dia].archivo + " (se deja ese)");
         else porDia[x.dia] = x;
       });
       var dias = Object.keys(porDia).sort();
       if (!dias.length) {
-        abrirHoja("Cargar el Metro (Mifare)", '<p class="error">No se pudo leer ningún archivo.</p><ul>' +
+        abrirHoja("Cargar el Metro", '<p class="error">No se pudo leer ningún archivo.</p><ul>' +
           errores.map(function (e) { return "<li>" + esc(e) + "</li>"; }).join("") + "</ul>" +
           '<div class="acciones"><button class="btn" type="button" data-cerrar-hoja>Cerrar</button></div>');
         return;
       }
       var res = await Promise.all([
-        placasDeSonar(dias),
+        sonarDeLosDias(dias),
         traerTodo(function () {
           return client.from("movilidad_externos").select("dia,interno").eq("fuente", "metro").in("dia", dias).order("dia").order("interno");
         }),
       ]);
-      var busDe = res[0], yaHabia = {};
+      var sonar = res[0], yaHabia = {};
       res[1].forEach(function (a) { (yaHabia[a.dia] = yaHabia[a.dia] || []).push(a.interno); });
       var filas = [], resumen = [];
       dias.forEach(function (dia) {
         var x = porDia[dia], buses = {}, sinBus = [], usos = 0;
-        Object.keys(x.por).forEach(function (placa) {
-          var p = x.por[placa], interno = busDe(placa, dia);
-          if (!interno) { sinBus.push(placa + " (" + p.cantidad + ")"); return; }
-          var b = buses[interno] || (buses[interno] = { cantidad: 0, valor: 0, tipos: {}, placas: [] });
-          b.cantidad += p.cantidad;
-          b.valor += p.valor;
-          b.placas.push(placa);
-          Object.keys(p.tipos).forEach(function (t) { b.tipos[t] = (b.tipos[t] || 0) + p.tipos[t]; });
-          usos += p.cantidad;
-        });
+        if (x.plantilla) {
+          Object.keys(x.porBus).forEach(function (interno) {
+            buses[interno] = { cantidad: x.porBus[interno], valor: 0, tipos: {}, placas: [] };
+            usos += x.porBus[interno];
+          });
+        } else {
+          Object.keys(x.por).forEach(function (placa) {
+            var p = x.por[placa], interno = sonar.bus(placa, dia);
+            if (!interno) { sinBus.push(placa + " (" + p.cantidad + ")"); return; }
+            var b = buses[interno] || (buses[interno] = { cantidad: 0, valor: 0, tipos: {}, placas: [] });
+            b.cantidad += p.cantidad;
+            b.valor += p.valor;
+            b.placas.push(placa);
+            Object.keys(p.tipos).forEach(function (t) { b.tipos[t] = (b.tipos[t] || 0) + p.tipos[t]; });
+            usos += p.cantidad;
+          });
+        }
+        // Lo que no cuadra con Sonar ese día (solo si el día ya está publicado): se avisa, pero se carga.
+        var noEsta = [], sinViajes = [];
+        if (sonar.publicado(dia)) {
+          Object.keys(buses).sort(compararInternos).forEach(function (interno) {
+            var v = sonar.viajes(interno, dia);
+            if (v == null) noEsta.push(interno + " (" + buses[interno].cantidad + ")");
+            else if (!v && buses[interno].cantidad > 0) sinViajes.push(interno + " (" + buses[interno].cantidad + ")");
+          });
+        }
         Object.keys(buses).forEach(function (interno) {
           var b = buses[interno];
           filas.push({ dia: dia, interno: interno, fuente: "metro", cantidad: b.cantidad, archivo: x.archivo,
-            detalle: { placa: b.placas.join(", "), valor: b.valor, tipos: b.tipos, usos_de: x.rango } });
+            detalle: x.plantilla ? { origen: "plantilla metro" } : { placa: b.placas.join(", "), valor: b.valor, tipos: b.tipos, usos_de: x.rango } });
         });
         (yaHabia[dia] || []).forEach(function (interno) {
           if (!buses[interno]) filas.push({ dia: dia, interno: interno, fuente: "metro", cantidad: 0, archivo: x.archivo,
             detalle: { nota: "No sale en este archivo" } });
         });
         resumen.push({ dia: dia, archivo: x.archivo, rango: x.rango, usos: usos, buses: Object.keys(buses).length, sinBus: sinBus,
-          reemplaza: !!(yaHabia[dia] || []).length });
+          noEsta: noEsta, sinViajes: sinViajes, reemplaza: !!(yaHabia[dia] || []).length });
       });
-      abrirHoja("Cargar el Metro (Mifare)",
-        '<p class="nota">Cada archivo va al día en que se usaron los pasajes (el que dice "Fecha de Uso de"), y la placa se pasa a ' +
-          "bus con las placas de Sonar. Cargar otra vez un día lo reemplaza.</p>" +
-        '<div class="tabla-caja"><table><thead><tr><th>Día de uso</th><th>Archivo</th><th class="n">Usos</th><th class="n">Buses</th><th></th></tr></thead><tbody>' +
+      abrirHoja("Cargar el Metro",
+        '<p class="nota">La plantilla metro (fecha, vehiculo, total) se guarda tal cual. Los archivos del Mifare van al día de su ' +
+          'nombre, como la plantilla (el "01-10" es el 1 de octubre), y la placa se pasa a bus con las placas de Sonar. ' +
+          "Cargar otra vez un día lo reemplaza: el bus que ya no sale queda en 0.</p>" +
+        '<div class="tabla-caja"><table><thead><tr><th>Día</th><th>Archivo</th><th class="n">Usos</th><th class="n">Buses</th><th></th></tr></thead><tbody>' +
         resumen.map(function (s) {
           return "<tr><td><strong>" + esc(fechaCorta(s.dia)) + '</strong><span class="menor">' + esc(diaSemana(s.dia)) + "</span></td><td>" +
             esc(s.archivo) + '<span class="menor">' + esc(s.rango) + '</span></td><td class="n">' + miles(s.usos) + '</td><td class="n">' + s.buses +
             "</td><td>" + (s.reemplaza ? chip("revisa", "Reemplaza lo cargado") : "") +
-            (s.sinBus.length ? chip("mal", "Placas sin bus en Sonar: " + s.sinBus.join(", ")) : "") + "</td></tr>";
+            (s.sinBus.length ? chip("mal", "Placas sin bus en Sonar: " + s.sinBus.join(", ")) : "") +
+            (s.noEsta.length ? chip("mal", "No están en Sonar ese día: " + s.noEsta.join(", ")) : "") +
+            (s.sinViajes.length ? chip("revisa", "Con Metro y sin viajes ese día: " + s.sinViajes.join(", ")) : "") + "</td></tr>";
         }).join("") + "</tbody></table></div>" +
         (errores.length ? '<p class="error">No se cargan:</p><ul>' + errores.map(function (e) { return "<li>" + esc(e) + "</li>"; }).join("") + "</ul>" : "") +
         '<p id="mifareError" class="error" hidden></p>' +
@@ -2335,10 +2422,10 @@
           });
         });
     } catch (err) {
-      aviso("No se pudieron leer los archivos del Mifare: " + textoError(err), "mal");
+      aviso("No se pudieron leer los archivos del Metro: " + textoError(err), "mal");
     } finally {
       boton.disabled = false;
-      boton.textContent = "Cargar Mifare";
+      boton.textContent = "Cargar Metro";
     }
   }
 
@@ -2586,7 +2673,7 @@
         "Descuento>20 va en 0: sin tope por viaje.",
         "Ajustes: los que escribieron los despachadores en Control (taller, administrativo, despachador...), más los gestores que subieron con su código y lo que control corrigió en un viaje.",
         "Viajes realizados: los viajes con despacho; cada uno resta 2. Los sin despacho Sonar los pone como \"sin ruta\": su gente suma en Sonar, pero no restan.",
-        "Pasajeros metro: los usos de la tarjeta Mifare (cívica) de ese bus, del archivo de la liquidación. Cada archivo va al día en que se usaron los pasajes (el \"01-10\" trae los del 30 de septiembre) y la placa se pasa a bus con las placas de Sonar. Se restan de los ingresos y de las salidas; si el día no tiene archivo cargado, va vacío y no resta.",
+        "Pasajeros metro: los usos de la tarjeta Mifare (cívica) de ese bus, de la plantilla metro (fecha, vehiculo, total) o de los archivos de la liquidación. Cada archivo del Mifare va al día de su nombre, como en la plantilla (el \"01-10\" es el 1 de octubre), y la placa se pasa a bus con las placas de Sonar. Se restan de los ingresos y de las salidas; si el día no tiene Metro cargado, va vacío y no resta.",
         "El bus va como texto y con un espacio al final (\"703 \"), menos el 710 y el 756, igual que en Movilidad 2026.",
         "La hoja Resumen por día suma la Base de datos con fórmulas.",
       ].forEach(function (t) { N.addRow([t]); });
@@ -3373,7 +3460,7 @@
     $("movMifareArchivo").addEventListener("change", function () {
       var lista = Array.prototype.slice.call(this.files || []);
       this.value = "";                                        // para poder escoger el mismo archivo otra vez
-      if (lista.length) cargarMifare(lista);
+      if (lista.length) cargarMetro(lista);
     });
     $("movLimpiar").addEventListener("click", function () { state.mov.filtro = filtroMovVacio(); pintarMovilidad(); });
     $("movCuerpo").addEventListener("toggle", function (ev) {

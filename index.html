@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./css/control.css?v=0.9.1">
+  <link rel="stylesheet" href="./css/control.css?v=0.9.2">
 </head>
 <body>
 
@@ -166,8 +166,8 @@
         <button id="movExcel" class="btn btn-sutil" type="button" disabled
           title="La hoja Base de datos de Movilidad 2026, con sus 25 columnas y las fórmulas, para pegar debajo">Descargar Excel</button>
         <button id="movMifare" class="btn btn-sutil" type="button" hidden
-          title="Los archivos LiquidacionUsosTransporteMifare (uno o varios .xlsx, o el .zip): los Pasajeros metro de cada bus">Cargar Mifare</button>
-        <input id="movMifareArchivo" type="file" accept=".xlsx,.zip" multiple hidden>
+          title="Los Pasajeros metro de cada bus: la plantilla metro (fecha, vehiculo, total) o los archivos LiquidacionUsosTransporteMifare (uno o varios .xlsx, o el .zip)">Cargar Metro</button>
+        <input id="movMifareArchivo" type="file" accept=".xlsx,.xls,.zip" multiple hidden>
       </form>
       <div id="movCuerpo"></div>
       <div id="movFiltros" class="filtros" hidden>
@@ -226,7 +226,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="./js/control-config.js?v=0.9.1"></script>
-<script src="./js/control.js?v=0.9.1"></script>
+<script src="./js/control-config.js?v=0.9.2"></script>
+<script src="./js/control.js?v=0.9.2"></script>
 </body>
 </html>
