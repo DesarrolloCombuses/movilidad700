@@ -103,8 +103,15 @@
   var fmtCorta = new Intl.DateTimeFormat("es-CO", { timeZone: "UTC", day: "numeric", month: "short" });
 
   function fechaDe(ms) { return fmtFecha.format(new Date(ms)); }
-  // El día de la tarjeta va de 3 a. m. a 3 a. m.: a la 1 de la mañana todavía es "ayer".
-  function diaDeHoy() { return fechaDe(Date.now() - 3 * HORA_MS); }
+  // El día de la tarjeta es el de la empresa: de 2:30 a. m. a 2:30 a. m. del día siguiente
+  // (cfg.DIA_EMPIEZA_MIN). A la 1 de la mañana todavía es "ayer".
+  var CORTE_MIN = cfg.DIA_EMPIEZA_MIN == null ? 150 : Number(cfg.DIA_EMPIEZA_MIN);
+  function diaDeHoy() { return fechaDe(Date.now() - CORTE_MIN * 60 * 1000); }
+  function horaDelCorte() {
+    var h = Math.floor(CORTE_MIN / 60), m = CORTE_MIN % 60;
+    return (h % 12 || 12) + ":" + (m < 10 ? "0" : "") + m + (h < 12 ? " a. m." : " p. m.");
+  }
+  function textoCorte() { return "de " + horaDelCorte() + " a " + horaDelCorte() + " del día siguiente"; }
   function esFecha(s) { return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "")); }
   function sumarDias(fecha, dias) {
     var d = new Date(fecha + "T12:00:00Z");
@@ -586,8 +593,7 @@
       d.error = null;
     }
     $("diaFecha").value = fecha;
-    $("diaSub").textContent = fechaLarga(fecha) +
-      (fecha === diaDeHoy() ? " · hoy (el día de la tarjeta va de 3 a. m. a 3 a. m.)" : "");
+    $("diaSub").textContent = fechaLarga(fecha) + " · " + textoCorte() + (fecha === diaDeHoy() ? " · hoy" : "");
     actualizarPestanas();
     pintarDia();
     if (!d.filas && !d.cargando) cargarDia();
@@ -949,7 +955,8 @@
 
     var r = nuevoResumen(b.interno);
     b.filas.forEach(function (f) { sumarViaje(r, f); });
-    $("busSub").textContent = fechaLarga(b.fecha) + (r.placa ? " · placa " + r.placa : "") + (b.base ? " · " + b.base : "");
+    $("busSub").textContent = fechaLarga(b.fecha) + " (" + textoCorte() + ")" +
+      (r.placa ? " · placa " + r.placa : "") + (b.base ? " · " + b.base : "");
     var dm = b.diaManual || {};
     var html = avisoDelBus(b.estadoBus) + '<div class="bus-cabeza">' +
       dato("Conductor 1", capitalizar(r.conductores[0] || "—")) +
@@ -1660,6 +1667,7 @@
   // ================================================================ eventos
   function iniciar() {
     iniciarAplicacion();
+    $("infSub").textContent += " Cada día va " + textoCorte() + ".";
     $("formEntrar").addEventListener("submit", alEntrar);
     $("btnSalir").addEventListener("click", async function () {
       // Solo este navegador: la misma cuenta puede estar abierta en otros PC (y signOut() sin

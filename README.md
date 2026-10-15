@@ -48,6 +48,13 @@ Todo sale de Supabase:
 
 Un aviso que se arregla queda en el historial del día ("Tuvo: … visto de 10:05 a 11:40"). Si el programa lleva 15 minutos sin revisar los buses de hoy, el Día lo dice: puede estar apagado o sin internet.
 
+### El día de la tarjeta
+
+Es el día de la empresa: **de 2:30 a. m. a 2:30 a. m. del día siguiente**. Un viaje va al día de la hora de su
+despacho. Por ejemplo, el 718 despachado a las 2:43 a. m. del 15-oct es el primer viaje del 15, y uno despachado a
+la 1:00 a. m. todavía es del día anterior. El Día, la tarjeta del bus y los Informes lo dicen. La hora está en
+`js/control-config.js` (`DIA_EMPIEZA_MIN`) y tiene que ser la misma del programa que publica la tarjeta.
+
 ### La base
 
 Sale de la programación del día. Si un bus no estaba programado ese día, toma la última base que tuvo en los 7 días anteriores. Si no tiene, sale "Sin base". La base escogida se recuerda en ese navegador.

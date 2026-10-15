@@ -4,9 +4,13 @@
 // deciden las reglas de la base con la cuenta con que entra
 // (almacentro/enturnes/sql/tarjeta_despacho.sql).
 window.CONTROL_CONFIG = {
-  VERSION: "v0.4.0",
+  VERSION: "v0.4.1",
   SUPABASE_URL: "https://cbplebkmxrkaafqdhiyi.supabase.co",
   SUPABASE_ANON_KEY: "sb_publishable_DZCceNTENY4ViP17-eZrGg_bdMElZ9X",
+
+  // El día de la tarjeta es el de la empresa: de las 2:30 a. m. a las 2:30 a. m. del día siguiente
+  // (en minutos desde la medianoche). Tiene que ser el mismo del programa que publica la tarjeta.
+  DIA_EMPIEZA_MIN: 150,
 
   // Más de esto en un informe es mucho para el navegador (un mes de toda la flota son ~20.000 viajes).
   INFORME_MAX_DIAS: 93,
