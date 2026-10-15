@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./css/control.css?v=0.8.0">
+  <link rel="stylesheet" href="./css/control.css?v=0.9.0">
 </head>
 <body>
 
@@ -164,9 +164,24 @@
         <label class="campo"><span>Hasta</span><input id="movHasta" type="date" required></label>
         <button class="btn btn-primario" type="submit">Ver</button>
         <button id="movExcel" class="btn btn-sutil" type="button" disabled
-          title="Las 25 columnas de la Base de datos de Movilidad 2026, para pegar debajo">Descargar Excel</button>
+          title="La hoja Base de datos de Movilidad 2026, con sus 25 columnas y las fórmulas, para pegar debajo">Descargar Excel</button>
+        <button id="movMifare" class="btn btn-sutil" type="button" hidden
+          title="Los archivos LiquidacionUsosTransporteMifare (uno o varios .xlsx, o el .zip): los Pasajeros metro de cada bus">Cargar Mifare</button>
+        <input id="movMifareArchivo" type="file" accept=".xlsx,.zip" multiple hidden>
       </form>
       <div id="movCuerpo"></div>
+      <div id="movFiltros" class="filtros" hidden>
+        <select id="movDia" aria-label="Día"><option value="">Todos los días</option></select>
+        <select id="movBase" aria-label="Base"><option value="">Todas las bases</option></select>
+        <div class="chips-filtro" role="group" aria-label="Mostrar">
+          <button type="button" id="movDifNeg" aria-pressed="false">Dif &lt; 0</button>
+          <button type="button" id="movMetro20" aria-pressed="false">Metro &gt; 20</button>
+        </div>
+        <input id="movBuscar" type="search" placeholder="Buscar texto en la tabla" aria-label="Buscar" autocomplete="off">
+        <button id="movVehiculos" class="btn btn-sutil" type="button">Vehículos: todos</button>
+        <button id="movLimpiar" class="btn btn-sutil" type="button">Limpiar filtros</button>
+      </div>
+      <div id="movTabla"></div>
     </section>
 
     <!-- ---- Gestores: sus celulares (aprobar) y lo que leyeron los conductores ---- -->
@@ -211,7 +226,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="./js/control-config.js?v=0.8.0"></script>
-<script src="./js/control.js?v=0.8.0"></script>
+<script src="./js/control-config.js?v=0.9.0"></script>
+<script src="./js/control.js?v=0.9.0"></script>
 </body>
 </html>

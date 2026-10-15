@@ -28,7 +28,7 @@ Cuando se publica una versión nueva, arriba sale **"Hay una versión nueva del 
 | **Día** | Todos los buses de un día: viajes, pasajeros y plata del sensor y del conductor, la diferencia, cívicas, tiquetes y qué falta o hay que revisar. Una tabla **por base** con sus totales; al tocar una base queda solo esa. Filtros: con aviso, no cuadran, por revisar, falta algo, sin despacho, por base y por ruta. El botón **Excel viaje a viaje** descarga el día completo como lo arman los auxiliares. |
 | **Tarjeta del bus** | La tarjeta de papel completa, viaje por viaje. Al abrir un viaje se ve **el mapa de su recorrido** y por qué itinerario fue, cada apertura de puerta (hora, suben, bajan, dónde, sensor tapado), quién escribió cada número y sus correcciones, y el daño del validador con su foto. Excel e imprimir con firmas. |
 | **Informes** | Entre dos fechas, agrupado por bus, conductor, ruta, día o base, o de una sola base. Por conductor sale primero el que más plata dice de menos. El Excel trae el resumen, cada viaje, las correcciones, los daños y los avisos de los buses. |
-| **Movilidad** | La "Base de datos" de Movilidad 2026: un renglón por bus y día, con las mismas 25 columnas, entre dos fechas. Los despachadores escriben los **ajustes** (despachador, taller, administrativo). **Descargar Excel** lo deja listo para pegar debajo en Movilidad 2026. |
+| **Movilidad** | La "Base de datos" de Movilidad 2026, como la sacaba 700control: un renglón por bus y día, con las mismas 25 columnas, entre dos fechas y con sus filtros. Los despachadores escriben los **ajustes** (taller, administrativo, despachador). **Descargar Excel** la deja igual al maestro, con las fórmulas, para pegar debajo. |
 | **Gestores** | Los celulares de los gestores **por aprobar** (con su selfie) y los aprobados, y lo que leyeron los conductores cada día: qué se restó, qué no y qué es sospechoso. Solo para despachadores. |
 
 ## De dónde salen los datos
@@ -73,26 +73,32 @@ En **Día**, el botón **Excel viaje a viaje** descarga el mismo Excel que arma 
 
 No trae la hoja **"Fuera de la ruta"** ni las aperturas sin viaje (patio, taller, aseo): Supabase solo guarda cuántas fueron. Esas siguen saliendo en el Excel del programa de Python.
 
-### La movilidad (v0.8.0, movilidad.sql)
+### La movilidad (v0.9.0, movilidad.sql versión 2)
 
-Hasta agosto, la "Base de datos" de Movilidad 2026 se armaba a mano con la plantilla 700control (el archivo de Sonar, el del Metro y el de ajustes). Ahora sale sola en **Movilidad**, de lo que publica el programa de la tarjeta, con la regla de la aplicación:
+Hasta agosto, la "Base de datos" de Movilidad 2026 se armaba con la plantilla [700control](https://github.com/DesarrolloCombuses/700control) (el archivo de Sonar, el del Metro y el de ajustes). Ahora sale sola en **Movilidad**, de lo que publica el programa de la tarjeta, **con la regla de 700control** y el Descuento>20 en cero:
 
 | Columna | De dónde sale |
 |---|---|
-| **Sonar** | Todo lo que contó la puerta entrando en el día, en los viajes y fuera de ellos. |
-| **Sin ruta** | Lo que entró fuera de los viajes: en la ruta sin viaje, y en el patio o el taller. No son pasajeros. |
-| **Descuento>20** | Lo que pasó del tope de 19 pasajeros en cada viaje (la regla de la tarjeta). |
-| **Ajustes** | Los que escriben los despachadores aquí (despachador, taller, administrativo u otro, con nota), más los gestores que subieron con su código. |
-| **Ingresos totales** | Sonar − Sin ruta − Descuento>20 − Ajustes. Da lo mismo que los pasajeros de la tarjeta menos los ajustes. |
-| **Salidas P1 / Total salidas** | Lo que bajó en los viajes − Descuento>20 − Ajustes. **Salidas P2** va en 0: el sensor no separa las puertas. |
-| **Dif** | Ingresos − Total salidas. |
-| **Viajes realizados** | Todos los viajes del día, también los sin despacho. |
-| **Observaciones** | Los motivos de los ajustes ("Despachador - Taller"), "Gestor", y "No laboró" si no hizo viajes. |
-| **Pasajeros metro** | Del archivo del Metro (se carga aparte; falta hacerlo con el archivo real). |
+| **Sonar** | Todo lo que contó la puerta entrando en el día: en los viajes y fuera del viaje a viaje. |
+| **Sin ruta** | Lo que entró fuera del viaje a viaje: en la ruta sin viaje, y en el patio o el taller. Ya va dentro de Sonar y de los ingresos; la columna solo lo muestra. |
+| **Descuento>20** | 0: sin tope por viaje. |
+| **Ajustes** | Los que escriben los despachadores aquí (taller, administrativo, despachador u otro, con nota), más los gestores que subieron con su código y lo que control corrigió en un viaje. |
+| **Ingresos totales** | Sonar − Descuento>20 − Viajes realizados − Ajustes. |
+| **Salidas P1** | Lo que bajó en los viajes más lo que bajó fuera de ellos. **Salidas P2** va en 0: el sensor no separa las puertas. |
+| **Total salidas** | Salidas P1 + Salidas P2 − Viajes realizados − Ajustes. |
+| **Dif** | Ingresos totales − Total salidas. En rojo cuando pasa de 30, como en el Excel. |
+| **Viajes realizados** | Los viajes **con despacho**. Los sin despacho Sonar los pone como "sin ruta": su gente suma en Sonar, pero no restan 1 (así coincide con la movilidad del 1 al 5 de octubre hecha con 700control). |
+| **Observaciones** | Los motivos de los ajustes, en el orden del Excel ("Taller - Administrativo - Despachador"), "Gestor", "Corrección de control" y "No laboró" si no hizo viajes. |
+| **Pasajeros metro** | Los usos de la tarjeta Mifare (cívica) de cada bus, de los archivos *LiquidacionUsosTransporteMifare*. En los días con archivo cargado, el bus sin usos va en 0. |
 
-- **Escribir un ajuste:** toque un día, busque el bus y toque **+ Ajuste**: cuántas personas y el motivo. No se borra: se **anula** con el porqué, y queda quién y cuándo.
-- **Descargar Excel:** la hoja *Base de datos* con las 25 columnas en el mismo orden de Movilidad 2026, más *Resumen por día*, *Ajustes* (con quién y cuándo) y *Notas*.
-- Hace falta correr `almacentro/enturnes/sql/movilidad.sql` en Supabase. Sin él la pestaña se ve, pero sin ajustes y con Sonar solo de los viajes.
+- **La pantalla** es la Base de datos: las mismas columnas del Excel, en el mismo orden, con la fila de totales abajo. Se filtra como en 700control: por **día**, **base**, **Dif < 0**, **Metro > 20**, texto y **vehículos**. Arriba van los totales y el **Resumen por día** (tocar un día deja solo ese día).
+- **Escribir un ajuste:** en el renglón del bus, **+ Ajuste**: cuántas personas y el motivo. No se borra: se **anula** con el porqué, y queda quién y cuándo.
+- **Cargar Mifare** (solo despachadores): uno o varios `LiquidacionUsosTransporteMifare DD-MM-AAAA.xlsx`, o el `.zip` con todos. Muestra antes de guardar qué día, cuántos usos y cuántos buses trae cada archivo. Reglas (15-oct-2026):
+  - cada archivo va al **día en que se usaron** los pasajes, el que dice "Fecha de Uso de": el "01-10" trae del 30-sep 2:30 a. m. al 01-oct 2:29 a. m. (el nombre es el día de la liquidación), y eso es el **30 de septiembre**, igual que el día de Sonar;
+  - la placa (*Equipo*) se pasa a número de bus con **las placas de Sonar**: la tabla de los archivos tenía cambiados 708 con 757 y 723 con 751;
+  - cargar otra vez un día lo reemplaza: el bus que ya no sale en el archivo queda en 0.
+- **Descargar Excel:** la hoja *Base de datos* igual a la de Movilidad 2026: las 25 columnas en el mismo orden, los mismos anchos y colores del encabezado, el filtro y la Dif en rojo. El bus va como texto con un espacio al final ("703 "), menos el 710 y el 756, como en el maestro. **Van con fórmula** Ingresos totales (`=U-R-V-N`), Total salidas (`=D+E-V-N`) y Dif (`=B-F`): si en el Excel cambian un ajuste o los viajes, se recalcula. Trae también *Resumen por día* (con `SUMAR.SI.CONJUNTO` sobre la Base de datos), *Ajustes* (con quién y cuándo) y *Notas*.
+- Hace falta `almacentro/enturnes/sql/movilidad.sql` **versión 2** en Supabase. Con la versión 1, Salidas P1 sale solo con lo que bajó en los viajes y la pestaña lo avisa; sin ninguna, no hay ajustes y Sonar sale solo con lo de los viajes.
 
 ### Avisos de los buses
 

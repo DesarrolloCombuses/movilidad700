@@ -359,11 +359,28 @@ tr.detalle-fila > td { padding: 0; background: var(--panel-2); }
 @media (max-width: 420px) { .celulares { grid-template-columns: 1fr; } }
 
 /* ---------------------------------------------------------------- movilidad (movilidad.sql) */
-.tabla-mov tbody tr.elegida td { background: var(--soft); }
-.tabla-mov tbody tr.elegida td:first-child { box-shadow: inset 4px 0 0 var(--primary); }
-.tabla-mov tr.mov-detalle > td { padding: 6px 0 14px 14px; background: var(--panel); }
-.tabla-mov tr.mov-detalle .tabla-caja { margin: 0; }
+.mov-resumen { margin-bottom: 14px; }
+.mov-resumen > summary { cursor: pointer; font-weight: 750; padding: 6px 0 10px; }
+.tabla-mov-dias tbody tr.elegida td { background: var(--soft); }
+.tabla-mov-dias tbody tr.elegida td:first-child { box-shadow: inset 4px 0 0 var(--primary); }
 tr.apagado td { color: var(--muted); }
+/* la Base de datos, como el Excel: los mismos títulos (sin mayúsculas) y los colores de su encabezado */
+.tabla-mov { font-size: 13px; }
+.tabla-mov th, .tabla-mov td { padding: 6px 8px; }
+.tabla-mov th { text-transform: none; letter-spacing: 0; white-space: normal; min-width: 54px; vertical-align: bottom; }
+.tabla-mov td { white-space: nowrap; }
+.tabla-mov td.obs { white-space: normal; min-width: 200px; }
+.tabla-mov .fijo { position: sticky; left: 0; z-index: 1; background: var(--panel); box-shadow: inset -1px 0 0 var(--line); }
+.tabla-mov thead .fijo { z-index: 3; background: var(--panel-2); }
+.tabla-mov tfoot .fijo { background: var(--panel-2); }
+.tabla-mov tr.apagado .fijo { color: var(--muted); }
+.tabla-mov th.x-sinruta { background: #83cbeb; color: #000; }
+.tabla-mov th.x-barrial { background: #ffff00; color: #000; }
+.tabla-mov th.x-metro { background: #b4e5a2; color: #000; }
+.tabla-mov th.x-desc { background: #d86ecc; color: #000; }
+.tabla-mov td.dif-alta { background: #ffc7ce; color: #9c0006; font-weight: 700; }
+.vehiculos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px 10px; margin-bottom: 12px; }
+.vehiculos-grid label { display: flex; align-items: center; gap: 6px; font-weight: 650; }
 .lista-ajustes { margin: 6px 0 12px; padding-left: 0; list-style: none; }
 .lista-ajustes li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 0; border-top: 1px solid var(--line); }
 .lista-ajustes li:first-child { border-top: 0; }

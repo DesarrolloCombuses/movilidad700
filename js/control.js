@@ -86,8 +86,9 @@
     // Gestores (sql v8): sus celulares y lo que el programa decidió de cada código que leyó un conductor
     ges: { fecha: null, lecturas: null, celulares: null, error: null, cargando: false },
     // Movilidad: la Base de datos de Movilidad 2026 (movilidad.sql: ajustes y archivos planos)
-    mov: { desde: null, hasta: null, datos: null, filas: null, error: null, cargando: false, abierto: null,
-      entradas: true, tablas: true, cargadoEn: null },
+    mov: { desde: null, hasta: null, datos: null, filas: null, error: null, cargando: false, resumenAbierto: false,
+      entradas: true, salidas: true, tablas: true, cargadoEn: null, armandoExcel: false,
+      filtro: { dia: "", base: "", difNeg: false, metro20: false, texto: "", vehiculos: [] } },
     v8: false,
   };
 
@@ -1694,26 +1695,39 @@
   }
 
   // ================================================================ MOVILIDAD: la "Base de datos" de Movilidad 2026
-  // Un renglón por bus y día con las mismas 25 columnas del Excel de movilidad (hasta agosto se armaba a mano con
-  // la plantilla 700control). Sale de lo que publica el programa de la tarjeta, con la regla de la aplicación:
-  //   Sonar            = todo lo que contó la puerta entrando en el día, en los viajes y fuera de ellos
-  //   Sin ruta         = lo que entró fuera de los viajes: en la ruta sin viaje y en el patio o el taller
-  //   Descuento>20     = lo que pasó del tope de 19 en cada viaje
-  //   Ajustes          = los que escriben aquí los despachadores (despachador, taller...) + los gestores con código
-  //   Ingresos totales = Sonar - Sin ruta - Descuento>20 - Ajustes   (= los pasajeros de la tarjeta - los ajustes)
-  //   Total salidas    = lo que contó bajando en los viajes - Descuento>20 - Ajustes;   Dif = Ingresos - Salidas
-  // Lo escrito a mano va en movilidad_ajustes y los archivos planos (Metro, cívica) en movilidad_externos
-  // (almacentro/enturnes/sql/movilidad.sql). Sin ese SQL se ve igual, pero sin ajustes ni lo de fuera de los viajes.
+  // Un renglón por bus y día con las mismas 25 columnas del Excel de movilidad, como lo sacaba la plantilla
+  // 700control (github DesarrolloCombuses/700control) con el archivo de Sonar. Sale de lo que publica el programa
+  // de la tarjeta, con la regla de 700control (decidida el 15-oct-2026):
+  //   Sonar             = todo lo que contó la puerta entrando en el día: en los viajes y fuera del viaje a viaje
+  //   Sin ruta          = lo que entró fuera del viaje a viaje (en la ruta sin viaje, y en el patio o el taller).
+  //                       Ya va dentro de Sonar y de los ingresos: la columna solo lo muestra
+  //   Descuento>20      = 0: sin tope
+  //   Ajustes           = los que escriben aquí los despachadores (taller, despachador...) + los gestores con código
+  //                       + lo que control corrigió en un viaje
+  //   Ingresos totales  = Sonar - Descuento>20 - Viajes realizados - Ajustes
+  //   Viajes realizados = los viajes con despacho (los sin despacho suman en Sonar, pero no restan)
+  //   Pasajeros metro   = los usos del Mifare de ese bus (Cargar Mifare, más abajo)
+  //   Salidas P1       = lo que contó bajando en los viajes + lo que bajó fuera de ellos;   Salidas P2 = 0
+  //   Total salidas     = Salidas P1 + Salidas P2 - Viajes realizados - Ajustes;   Dif = Ingresos - Total salidas
+  // En el Excel, Ingresos, Total salidas y Dif van con esas fórmulas. Lo escrito a mano va en movilidad_ajustes y
+  // los archivos planos (Metro, cívica) en movilidad_externos (almacentro/enturnes/sql/movilidad.sql, versión 2:
+  // trae también las salidas fuera de los viajes). Sin ese SQL se ve igual, pero sin ajustes ni lo de fuera.
   var MOV_COLUMNAS = ["Vehiculo", "Ingresos totales", null, "Salidas P1", " Salidas P2", "Total salidas", "Dif", "Ruta",
     "Fecha", "Mes", "Año", "# Día", "Base", "Ajustes", "Sin ruta", "Barrial", "Pasajeros metro", "Descuento>20", "No labora",
     "Observaciones", "Sonar ", "Viajes realizados", "SUB-RUTA", "A-G", "Observaciones pasajero 20"];
-  var MOV_MOTIVOS = ["Despachador", "Taller", "Administrativo", "Otro"];
+  // En las observaciones van en este orden, como en el Excel ("Taller - Administrativo - Despachador").
+  var MOV_MOTIVOS = ["Taller", "Administrativo", "Despachador", "Otro"];
   var MOV_MAX_DIAS = 62;
   var MOV_RUTA = "700";
   var MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre",
     "Noviembre", "Diciembre"];
   var DIAS_SEMANA = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
   var CAMPOS_MOV_BUS = "dia,interno,placa,programado,viajes,estado,aviso";
+  var CAMPOS_MOV_ENTRADAS = ",entradas_sin_viaje,entradas_fuera_ruta";
+  var CAMPOS_MOV_SALIDAS = ",salidas_sin_viaje,salidas_fuera_ruta";
+  // En el Excel de movilidad el bus va como texto y con un espacio al final ("703 "), menos estos dos: así lo
+  // agrupan las tablas dinámicas, y un "703" sin espacio saldría como otro bus.
+  var MOV_SIN_ESPACIO = ["710", "756"];
 
   function textoDeError(err) { return String((err && ((err.code || "") + " " + (err.message || ""))) || ""); }
   function faltaTabla(err) {
@@ -1733,7 +1747,7 @@
     if (cambio || (!m.filas && !m.cargando)) {
       m.filas = null;
       m.error = null;
-      if (cambio) m.abierto = null;
+      if (cambio) m.filtro = filtroMovVacio();
       pintarMovilidad();
       cargarMovilidad();
     } else {
@@ -1755,15 +1769,21 @@
     $("movExcel").disabled = true;
     function sigue() { return m.desde === desde && m.hasta === hasta; }
     try {
-      var entradas = true, tablas = true;
+      var entradas = true, salidas = true, tablas = true;
       function rango(q) { return q.gte("dia", desde).lte("dia", hasta); }
-      // Sin movilidad.sql: tarjeta_buses_dia no trae lo que entró fuera de los viajes, ni están los ajustes.
-      var estados = traerTodo(function () {
-        return rango(client.from("tarjeta_buses_dia").select(CAMPOS_MOV_BUS + ",entradas_sin_viaje,entradas_fuera_ruta")).order("dia").order("interno");
-      }).catch(function (err) {
+      function deBuses(campos) {
+        return traerTodo(function () { return rango(client.from("tarjeta_buses_dia").select(campos)).order("dia").order("interno"); });
+      }
+      // Sin movilidad.sql, tarjeta_buses_dia no trae lo que entró y salió fuera de los viajes, ni están los ajustes.
+      // Con la versión 1 trae lo que entró pero no lo que salió.
+      var estados = deBuses(CAMPOS_MOV_BUS + CAMPOS_MOV_ENTRADAS + CAMPOS_MOV_SALIDAS).catch(function (err) {
         if (!faltaColumna(err)) throw err;
-        entradas = false;
-        return traerTodo(function () { return rango(client.from("tarjeta_buses_dia").select(CAMPOS_MOV_BUS)).order("dia").order("interno"); });
+        salidas = false;
+        return deBuses(CAMPOS_MOV_BUS + CAMPOS_MOV_ENTRADAS).catch(function (err2) {
+          if (!faltaColumna(err2)) throw err2;
+          entradas = false;
+          return deBuses(CAMPOS_MOV_BUS);
+        });
       });
       // Por tandas de 1.000: el orden tiene que ser por la llave, o una tanda repite o salta renglones.
       function deMovilidad(tabla, campos, orden) {
@@ -1791,6 +1811,7 @@
       if (!sigue()) return;
       m.datos = { viajes: res[0], bajadas: res[1], estados: res[2], porBus: res[3], ajustes: res[4], externos: res[5], manual: res[6] };
       m.entradas = entradas;
+      m.salidas = salidas;
       m.tablas = tablas;
       m.filas = armarMovilidad(m.datos);
       m.error = null;
@@ -1828,6 +1849,7 @@
       return filas[k] || (filas[k] = {
         dia: dia, interno: interno, base: baseEn(d.porBus, interno, dia), viajes: 0, sd: 0, subidas: 0, bajadas: 0,
         recortados: 0, gestores: 0, pasajeros: 0, correccion: 0, enCurso: 0, sinViaje: null, fueraRuta: null,
+        salenSinViaje: null, salenFueraRuta: null,
         ajustes: [], manual: 0, metro: null, civica: null, estado: null, aviso: "", obs: "",
       });
     }
@@ -1838,6 +1860,8 @@
       r.aviso = e.aviso || "";
       if (e.entradas_sin_viaje != null) r.sinViaje = n(e.entradas_sin_viaje);
       if (e.entradas_fuera_ruta != null) r.fueraRuta = n(e.entradas_fuera_ruta);
+      if (e.salidas_sin_viaje != null) r.salenSinViaje = n(e.salidas_sin_viaje);
+      if (e.salidas_fuera_ruta != null) r.salenFueraRuta = n(e.salidas_fuera_ruta);
     });
     d.viajes.forEach(function (v) {
       if (v.interno === "PRUEBA") return;
@@ -1857,7 +1881,13 @@
       r.ajustes.push(a);
       if (!a.anulado_en) r.manual += n(a.cantidad);
     });
-    d.externos.forEach(function (x) { fila(x.dia, x.interno)[x.fuente === "civica" ? "civica" : "metro"] = n(x.cantidad); });
+    // Con el archivo del Metro cargado para un día, el bus que no sale en él tuvo 0 (como en el Excel), no "—".
+    var conMetro = {};
+    d.externos.forEach(function (x) {
+      fila(x.dia, x.interno)[x.fuente === "civica" ? "civica" : "metro"] = n(x.cantidad);
+      if (x.fuente !== "civica") conMetro[x.dia] = true;
+    });
+    Object.keys(filas).forEach(function (k) { if (filas[k].metro == null && conMetro[filas[k].dia]) filas[k].metro = 0; });
     d.manual.forEach(function (x) {
       var r = filas[x.dia + "|" + String(x.interno).trim()];
       if (r && x.observaciones) r.obs = String(x.observaciones).trim();
@@ -1869,11 +1899,17 @@
 
   function calcularMovilidad(r) {
     r.sinRuta = r.sinViaje == null && r.fueraRuta == null ? null : n(r.sinViaje) + n(r.fueraRuta);
+    r.salenFuera = r.salenSinViaje == null && r.salenFueraRuta == null ? null : n(r.salenSinViaje) + n(r.salenFueraRuta);
     r.sonar = r.subidas + n(r.sinRuta);
-    r.descuento = r.recortados;
+    r.descuento = 0;                                  // Descuento>20 en cero: sin tope (15-oct-2026)
     r.ajuste = r.manual + r.gestores + r.correccion;
-    r.ingresos = r.sonar - n(r.sinRuta) - r.descuento - r.ajuste;
-    r.salidas = r.bajadas - r.descuento - r.ajuste;
+    // Viajes realizados: solo los que tienen despacho. Los sin despacho Sonar los pone como "sin ruta": su gente
+    // suma en Sonar, pero no restan 1 (así coincide con la movilidad hecha con 700control, 15-oct-2026).
+    r.viajesReal = r.viajes - r.sd;
+    r.ingresos = r.sonar - r.descuento - r.viajesReal - r.ajuste;
+    r.salidasP1 = r.bajadas + n(r.salenFuera);
+    r.salidasP2 = 0;                                  // el sensor no separa las puertas
+    r.salidas = r.salidasP1 + r.salidasP2 - r.viajesReal - r.ajuste;
     r.dif = r.ingresos - r.salidas;
     var partes = [];
     MOV_MOTIVOS.forEach(function (motivo) {
@@ -1894,33 +1930,66 @@
   function resumenMovilidadPorDia(filas) {
     var dias = {};
     filas.forEach(function (r) {
-      var d = dias[r.dia] || (dias[r.dia] = { dia: r.dia, filas: [], buses: 0, trabajaron: 0, viajes: 0, sd: 0, sonar: 0,
-        sinRuta: null, descuento: 0, ajuste: 0, gestores: 0, ingresos: 0, salidas: 0, dif: 0, metro: null, enCurso: 0 });
+      var d = dias[r.dia] || (dias[r.dia] = { dia: r.dia, filas: [], buses: 0, trabajaron: 0, viajes: 0, viajesReal: 0, sd: 0, sonar: 0,
+        sinRuta: null, salenFuera: null, descuento: 0, ajuste: 0, gestores: 0, ingresos: 0, salidasP1: 0, salidas: 0, dif: 0,
+        metro: null, enCurso: 0 });
       d.filas.push(r);
       d.buses++;
       if (r.viajes) d.trabajaron++;
-      ["viajes", "sd", "sonar", "descuento", "ajuste", "gestores", "ingresos", "salidas", "dif", "enCurso"].forEach(function (c) { d[c] += r[c]; });
+      ["viajes", "viajesReal", "sd", "sonar", "descuento", "ajuste", "gestores", "ingresos", "salidasP1", "salidas", "dif", "enCurso"].forEach(function (c) { d[c] += r[c]; });
       if (r.sinRuta != null) d.sinRuta = n(d.sinRuta) + r.sinRuta;
+      if (r.salenFuera != null) d.salenFuera = n(d.salenFuera) + r.salenFuera;
       if (r.metro != null) d.metro = n(d.metro) + r.metro;
     });
     return Object.keys(dias).sort().map(function (k) { return dias[k]; });
   }
 
   function numMov(x) { return x == null ? "—" : miles(x) === "0" ? "0" : (x < 0 ? "−" : "") + miles(x); }
+  function diaSemana(dia) { return DIAS_SEMANA[new Date(dia + "T12:00:00Z").getUTCDay()]; }
+  function fechaMov(dia) { var p = dia.split("-"); return p[2] + "/" + p[1] + "/" + p[0]; }   // 14/10/2026, como 700control
+  function filtroMovVacio() { return { dia: "", base: "", difNeg: false, metro20: false, texto: "", vehiculos: [] }; }
+
+  // Lo que dejan ver los filtros, como en 700control: día, base, Dif < 0, Metro > 20, el texto y los vehículos.
+  function filtrarMovilidad(filas) {
+    var f = state.mov.filtro;
+    var texto = f.texto.trim().toLowerCase();
+    return filas.filter(function (r) {
+      if (f.dia && r.dia !== f.dia) return false;
+      if (f.base && String(r.base || "") !== f.base) return false;
+      if (f.difNeg && !(r.dif < 0)) return false;
+      if (f.metro20 && !(n(r.metro) > 20)) return false;
+      if (f.vehiculos.length && f.vehiculos.indexOf(r.interno) < 0) return false;
+      if (texto && celdasMov(r).join(" ").toLowerCase().indexOf(texto) < 0) return false;
+      return true;
+    });
+  }
+
+  // El renglón como se ve en la pantalla: las columnas de la Base de datos, sin la que no tiene título (la C).
+  var MOV_TITULOS = ["Vehiculo", "Ingresos totales", "Salidas P1", "Salidas P2", "Total salidas", "Dif", "Ruta", "Fecha", "Mes",
+    "Año", "# Día", "Base", "Ajustes", "Sin ruta", "Barrial", "Pasajeros metro", "Descuento>20", "No labora", "Observaciones",
+    "Sonar", "Viajes realizados", "SUB-RUTA", "A-G", "Observaciones pasajero 20"];
+  var MOV_COLOR_TITULO = { "Sin ruta": "x-sinruta", "Barrial": "x-barrial", "Pasajeros metro": "x-metro", "Descuento>20": "x-desc" };
+  var MOV_NUMEROS = ["Ingresos totales", "Salidas P1", "Salidas P2", "Total salidas", "Dif", "Año", "Ajustes", "Sin ruta",
+    "Pasajeros metro", "Descuento>20", "Sonar", "Viajes realizados"];
+  function celdasMov(r) {
+    var f = new Date(r.dia + "T12:00:00Z");
+    return [r.interno, r.ingresos, r.salidasP1, r.salidasP2, r.salidas, r.dif, MOV_RUTA, fechaMov(r.dia), MESES[f.getUTCMonth()],
+      f.getUTCFullYear(), DIAS_SEMANA[f.getUTCDay()], baseNumero(r.base), r.ajuste, r.sinRuta, "", r.metro, r.descuento, "",
+      r.observaciones || "", r.sonar, r.viajesReal, "", "", r.faltante ? "Vehículo faltante" : ""];
+  }
 
   function pintarMovilidad() {
     var m = state.mov, cuerpo = $("movCuerpo");
     var malo = rangoMovilidadMalo(m);
+    $("movMifare").hidden = !(state.revisor && m.tablas);       // cargar el Metro: solo los despachadores
     $("movSub").textContent = malo ? "Un renglón por bus y día, como la Base de datos de Movilidad 2026." :
       "Ruta " + MOV_RUTA + " · del " + fechaCorta(m.desde) + " al " + fechaCorta(m.hasta) + " · cada día va " + textoCorte() + ".";
-    if (malo) {
+    if (malo || !m.filas) {
       $("movExcel").disabled = true;
-      cuerpo.innerHTML = '<p class="vacio">' + esc(malo) + "</p>";
-      return;
-    }
-    if (!m.filas) {
-      $("movExcel").disabled = true;
-      cuerpo.innerHTML = m.error ? cajaError("No se pudo traer la movilidad: " + textoError(m.error), "recargar-movilidad")
+      $("movFiltros").hidden = true;
+      $("movTabla").innerHTML = "";
+      cuerpo.innerHTML = malo ? '<p class="vacio">' + esc(malo) + "</p>"
+        : m.error ? cajaError("No se pudo traer la movilidad: " + textoError(m.error), "recargar-movilidad")
         : '<p class="cargando">Trayendo los viajes y los buses de esos días…</p>';
       return;
     }
@@ -1928,70 +1997,346 @@
     var dias = resumenMovilidadPorDia(m.filas);
     var t = resumenMovilidadPorDia(m.filas.map(function (r) { return Object.assign({}, r, { dia: "todo" }); }))[0];
     var html = "";
-    if (!m.entradas || !m.tablas) {
-      html += '<p class="aviso-programa">' + (!m.tablas
-        ? "Falta correr <strong>movilidad.sql</strong> en Supabase: sin él no se pueden escribir los ajustes ni cargar el Metro, y Sonar sale solo con lo de los viajes."
-        : "Sonar sale solo con lo de los viajes: el programa de la oficina todavía no ha publicado lo que entró fuera de ellos (Sin ruta) para estos días.") +
-        "</p>";
-    } else if (dias.some(function (d) { return d.sinRuta == null; })) {
-      html += '<p class="aviso-programa">Algunos días no tienen lo que entró fuera de los viajes (Sin ruta): en esos, Sonar sale solo con lo de los viajes. ' +
-        "Se completan recargando esos días con el programa nuevo.</p>";
-    }
+    var falta = !m.tablas
+      ? "Falta correr <strong>movilidad.sql</strong> en Supabase: sin él no se pueden escribir los ajustes ni cargar el Metro, y Sonar sale solo con lo de los viajes."
+      : !m.entradas ? "Sonar sale solo con lo de los viajes: el programa de la oficina todavía no ha publicado lo que entró fuera de ellos (Sin ruta)."
+      : !m.salidas ? "Falta correr otra vez <strong>movilidad.sql</strong> (la versión 2) en Supabase: sin ella, Salidas P1 sale solo con lo que bajó en los viajes, y la Dif de los buses que movieron gente fuera del viaje a viaje sale alta."
+      : dias.some(function (d) { return d.sinRuta == null; }) ? "Algunos días no tienen lo que entró fuera del viaje a viaje (Sin ruta): en esos, Sonar sale solo con lo de los viajes. Se completan recargando esos días con el programa nuevo."
+      : dias.some(function (d) { return d.salenFuera == null; }) ? "Algunos días no tienen lo que bajó fuera de los viajes: en esos, Salidas P1 sale solo con lo de los viajes y la Dif puede salir alta. Se completan recargando esos días con el programa nuevo."
+      : "";
+    if (falta) html += '<p class="aviso-programa">' + falta + "</p>";
     if (t) {
       html += '<div class="totales">' +
         '<div class="total"><span>Días</span><strong>' + dias.length + "</strong><small>" + miles(t.buses) + " renglones bus-día</small></div>" +
-        '<div class="total"><span>Viajes</span><strong>' + miles(t.viajes) + "</strong><small>" + miles(t.sd) + " sin despacho</small></div>" +
+        '<div class="total"><span>Viajes realizados</span><strong>' + miles(t.viajesReal) + "</strong><small>con despacho; " + miles(t.sd) +
+          " sin despacho no restan</small></div>" +
         '<div class="total"><span>Sonar</span><strong>' + numMov(t.sonar) + "</strong><small>Sin ruta: " + numMov(t.sinRuta) + "</small></div>" +
-        '<div class="total"><span>Descuento &gt;19 y ajustes</span><strong>' + numMov(t.descuento + t.ajuste) + "</strong><small>" +
-          numMov(t.descuento) + " del tope · " + numMov(t.ajuste) + " ajustes" + (t.gestores ? " (" + numMov(t.gestores) + " gestores)" : "") + "</small></div>" +
-        '<div class="total" data-tono="bien"><span>Ingresos totales</span><strong>' + numMov(t.ingresos) + "</strong><small>salidas " + numMov(t.salidas) +
-          " · dif " + numMov(t.dif) + "</small></div>" +
+        '<div class="total"><span>Ajustes</span><strong>' + numMov(t.ajuste) + "</strong><small>" +
+          (t.gestores ? numMov(t.gestores) + " de gestores con código" : "escritos por los despachadores") + "</small></div>" +
+        '<div class="total" data-tono="bien"><span>Ingresos totales</span><strong>' + numMov(t.ingresos) + "</strong><small>Total salidas " +
+          numMov(t.salidas) + " · Dif " + numMov(t.dif) + "</small></div>" +
         '<div class="total"><span>Pasajeros metro</span><strong>' + numMov(t.metro) + "</strong><small>" +
           (t.metro == null ? "todavía no se ha cargado el archivo" : "de los archivos cargados") + "</small></div>" +
         "</div>";
     }
-    var hoy = diaDeHoy();
-    html += '<div class="tabla-caja"><table class="tabla-mov"><thead><tr><th>Día</th><th class="n">Buses</th><th class="n">Viajes</th>' +
-      '<th class="n">Sonar</th><th class="n">Sin ruta</th><th class="n">Desc. &gt;19</th><th class="n">Ajustes</th>' +
-      '<th class="n">Ingresos</th><th class="n">Salidas</th><th class="n">Dif</th><th class="n">Metro</th><th></th></tr></thead><tbody>';
-    if (!dias.length) html += '<tr><td colspan="12" class="vacio">No hay nada publicado en esas fechas.</td></tr>';
+    var hoy = diaDeHoy(), elegido = m.filtro.dia;
+    html += '<details class="mov-resumen" id="movResumen"' + (m.resumenAbierto ? " open" : "") + "><summary>Resumen por día</summary>" +
+      '<div class="tabla-caja"><table class="tabla-mov-dias"><thead><tr><th>Día</th><th class="n">Buses</th><th class="n">Viajes</th>' +
+      '<th class="n">Sonar</th><th class="n">Sin ruta</th><th class="n">Ajustes</th><th class="n">Ingresos</th>' +
+      '<th class="n">Total salidas</th><th class="n">Dif</th><th class="n">Metro</th><th></th></tr></thead><tbody>';
+    if (!dias.length) html += '<tr><td colspan="11" class="vacio">No hay nada publicado en esas fechas.</td></tr>';
     dias.forEach(function (d) {
-      var abierto = m.abierto === d.dia;
-      html += '<tr class="fila-link' + (abierto ? " elegida" : "") + '" tabindex="0" data-mov-dia="' + esc(d.dia) + '" aria-expanded="' + abierto + '">' +
-        "<td><strong>" + esc(fechaCorta(d.dia)) + '</strong><span class="menor">' + esc(DIAS_SEMANA[new Date(d.dia + "T12:00:00Z").getUTCDay()]) + "</span></td>" +
-        '<td class="n">' + d.trabajaron + "/" + d.buses + '</td><td class="n">' + d.viajes + '</td><td class="n">' + numMov(d.sonar) +
-        '</td><td class="n">' + numMov(d.sinRuta) + '</td><td class="n">' + numMov(d.descuento) + '</td><td class="n">' + numMov(d.ajuste) +
+      html += '<tr class="fila-link' + (elegido === d.dia ? " elegida" : "") + '" tabindex="0" data-mov-dia="' + esc(d.dia) + '">' +
+        "<td><strong>" + esc(fechaCorta(d.dia)) + '</strong><span class="menor">' + esc(diaSemana(d.dia)) + "</span></td>" +
+        '<td class="n">' + d.trabajaron + "/" + d.buses + '</td><td class="n">' + d.viajesReal + '</td><td class="n">' + numMov(d.sonar) +
+        '</td><td class="n">' + numMov(d.sinRuta) + '</td><td class="n">' + numMov(d.ajuste) +
         '</td><td class="n"><strong>' + numMov(d.ingresos) + '</strong></td><td class="n">' + numMov(d.salidas) +
         '</td><td class="n">' + numMov(d.dif) + '</td><td class="n">' + numMov(d.metro) + "</td><td>" +
         (d.dia === hoy || d.enCurso ? chip("revisa", d.dia === hoy ? "Hoy: todavía cambia" : "Con viajes en camino") : "") + "</td></tr>";
-      if (abierto) html += '<tr class="mov-detalle"><td colspan="12">' + tablaMovilidadDia(d) + "</td></tr>";
     });
-    html += "</tbody></table></div>";
-    html += '<p class="pie">' + (m.cargadoEn ? "Actualizado a las " + fmtHora.format(new Date(m.cargadoEn)) + ". " : "") +
-      "Toque un día para ver sus buses" + (state.revisor && m.tablas ? " y escribir los ajustes" : "") + ". " +
-      "Ingresos = Sonar − Sin ruta − Descuento − Ajustes: los pasajeros de la tarjeta (tope 19, sin gestores) menos los ajustes.</p>";
+    html += "</tbody></table></div></details>";
     cuerpo.innerHTML = html;
+    pintarFiltrosMov(dias);
+    pintarTablaMov();
   }
 
-  function tablaMovilidadDia(d) {
-    var puede = state.revisor && state.mov.tablas;
-    return '<div class="tabla-caja"><table><thead><tr><th>Bus</th><th>Base</th><th class="n">Viajes</th><th class="n">Sonar</th>' +
-      '<th class="n">Sin ruta</th><th class="n">Desc. &gt;19</th><th class="n">Gestores</th><th>Ajustes</th><th class="n">Ingresos</th>' +
-      '<th class="n">Salidas</th><th class="n">Dif</th><th class="n">Metro</th><th>Observaciones</th></tr></thead><tbody>' +
-      d.filas.map(function (r) {
-        var vigentes = r.ajustes.filter(function (a) { return !a.anulado_en; });
-        var ajustes = vigentes.map(function (a) { return chip("", a.cantidad + " " + (a.motivo === "Otro" ? a.nota || "Otro" : a.motivo)); }).join(" ");
-        var boton = puede || r.ajustes.length
-          ? ' <button class="btn btn-chico" type="button" data-mov-ajuste="' + esc(r.interno) + '" data-mov-ajuste-dia="' + esc(r.dia) + '">' +
-            (puede ? (vigentes.length ? "Cambiar" : "+ Ajuste") : "Ver") + "</button>" : "";
-        return "<tr" + (r.viajes ? "" : ' class="apagado"') + '><td><a class="bus-num" href="#/bus/' + encodeURIComponent(r.interno) + "/" + r.dia + '">' +
-          esc(r.interno) + "</a></td><td>" + esc(r.base || "") + '</td><td class="n">' + r.viajes + (r.sd ? '<span class="menor">' + r.sd + " sin desp.</span>" : "") +
-          '</td><td class="n">' + numMov(r.sonar) + '</td><td class="n">' + numMov(r.sinRuta) + '</td><td class="n">' + numMov(r.descuento) +
-          '</td><td class="n">' + (r.gestores || "") + '</td><td class="mov-ajustes">' + (ajustes || (boton ? "" : "—")) + boton +
-          '</td><td class="n"><strong>' + numMov(r.ingresos) + '</strong></td><td class="n">' + numMov(r.salidas) + '</td><td class="n">' +
-          numMov(r.dif) + '</td><td class="n">' + numMov(r.metro) + "</td><td>" + esc(r.observaciones) +
-          (r.faltante ? '<span class="menor">Vehículo faltante (no está en Sonar)</span>' : "") + "</td></tr>";
-      }).join("") + "</tbody></table></div>";
+  function pintarFiltrosMov(dias) {
+    var m = state.mov, f = m.filtro;
+    var bases = {};
+    m.filas.forEach(function (r) { if (r.base) bases[r.base] = true; });
+    if (f.dia && !dias.some(function (d) { return d.dia === f.dia; })) f.dia = "";
+    if (f.base && !bases[f.base]) f.base = "";
+    $("movDia").innerHTML = '<option value="">Todos los días</option>' + dias.map(function (d) {
+      return '<option value="' + esc(d.dia) + '">' + esc(diaSemana(d.dia) + " " + fechaMov(d.dia)) + "</option>";
+    }).join("");
+    $("movDia").value = f.dia;
+    $("movBase").innerHTML = '<option value="">Todas las bases</option>' + Object.keys(bases).sort(function (a, b) {
+      return a.localeCompare(b, "es", { numeric: true });
+    }).map(function (b) { return '<option value="' + esc(b) + '">' + esc(b) + "</option>"; }).join("");
+    $("movBase").value = f.base;
+    $("movDifNeg").setAttribute("aria-pressed", String(f.difNeg));
+    $("movMetro20").setAttribute("aria-pressed", String(f.metro20));
+    if ($("movBuscar").value !== f.texto) $("movBuscar").value = f.texto;
+    $("movVehiculos").textContent = f.vehiculos.length ? "Vehículos: " + f.vehiculos.length : "Vehículos: todos";
+    $("movFiltros").hidden = !m.filas.length;
+  }
+
+  // La Base de datos en la pantalla: las mismas columnas del Excel y, abajo, los totales de lo que se ve.
+  function pintarTablaMov() {
+    var m = state.mov;
+    if (!m.filas || !m.filas.length) { $("movTabla").innerHTML = ""; return; }
+    var filas = filtrarMovilidad(m.filas);
+    var puede = state.revisor && m.tablas;
+    var suma = {};
+    var html = '<p class="pie">' + (filas.length === m.filas.length ? miles(filas.length) + " renglones" :
+      miles(filas.length) + " de " + miles(m.filas.length) + " renglones (con los filtros)") +
+      (m.cargadoEn ? " · actualizado a las " + fmtHora.format(new Date(m.cargadoEn)) : "") + "</p>" +
+      '<div class="tabla-caja"><table class="tabla-mov"><thead><tr>' + MOV_TITULOS.map(function (c, i) {
+        var clases = [i === 0 ? "fijo" : "", MOV_NUMEROS.indexOf(c) >= 0 ? "n" : "", MOV_COLOR_TITULO[c] || ""].filter(Boolean).join(" ");
+        return "<th" + (clases ? ' class="' + clases + '"' : "") + ">" + esc(c) + "</th>";
+      }).join("") + "</tr></thead><tbody>";
+    if (!filas.length) html += '<tr><td colspan="' + MOV_TITULOS.length + '" class="vacio">Ningún renglón con esos filtros.</td></tr>';
+    filas.forEach(function (r) {
+      var c = celdasMov(r);
+      MOV_TITULOS.forEach(function (t, i) { if (MOV_NUMEROS.indexOf(t) >= 0 && t !== "Año" && c[i] != null) suma[t] = n(suma[t]) + c[i]; });
+      var vigentes = r.ajustes.filter(function (a) { return !a.anulado_en; });
+      var boton = puede || r.ajustes.length
+        ? ' <button class="btn btn-chico" type="button" data-mov-ajuste="' + esc(r.interno) + '" data-mov-ajuste-dia="' + esc(r.dia) + '">' +
+          (puede ? (vigentes.length ? "Cambiar" : "+ Ajuste") : "Ver") + "</button>" : "";
+      html += "<tr" + (r.viajes ? "" : ' class="apagado"') + ">" + MOV_TITULOS.map(function (t, i) {
+        var v = c[i];
+        if (i === 0) return '<td class="fijo"><a class="bus-num" href="#/bus/' + encodeURIComponent(r.interno) + "/" + r.dia + '">' + esc(v) + "</a></td>";
+        if (t === "Ingresos totales") return '<td class="n"><strong>' + numMov(v) + "</strong></td>";
+        if (t === "Dif") return '<td class="n' + (v > 30 ? " dif-alta" : "") + '">' + numMov(v) + "</td>";
+        if (t === "Ajustes") return '<td class="n mov-ajustes">' + numMov(v) + boton + "</td>";
+        if (t === "Viajes realizados") return '<td class="n">' + v + (r.sd ? '<span class="menor">+' + r.sd + " sin desp.</span>" : "") + "</td>";
+        if (t === "Año") return '<td class="n">' + v + "</td>";
+        if (MOV_NUMEROS.indexOf(t) >= 0) return '<td class="n">' + numMov(v) + "</td>";
+        return "<td" + (t === "Observaciones" ? ' class="obs"' : "") + ">" + esc(v == null ? "" : v) + "</td>";
+      }).join("") + "</tr>";
+    });
+    html += "</tbody>";
+    if (filas.length) {
+      html += "<tfoot><tr>" + MOV_TITULOS.map(function (t, i) {
+        if (i === 0) return '<td class="fijo">Total</td>';
+        if (t === "Año" || MOV_NUMEROS.indexOf(t) < 0) return "<td></td>";
+        return '<td class="n">' + (suma[t] == null ? "—" : numMov(suma[t])) + "</td>";
+      }).join("") + "</tr></tfoot>";
+    }
+    html += "</table></div>" +
+      '<p class="pie">Ingresos totales = Sonar − Descuento&gt;20 − Viajes realizados − Ajustes. Total salidas = Salidas P1 + Salidas P2 − ' +
+      "Viajes realizados − Ajustes. Dif = Ingresos − Total salidas. Sin ruta (lo de fuera del viaje a viaje) ya va dentro de Sonar. " +
+      "Viajes realizados cuenta los viajes con despacho: los sin despacho suman en Sonar, pero no restan." +
+      (puede ? " Los ajustes se escriben con el botón de cada bus." : "") + "</p>";
+    $("movTabla").innerHTML = html;
+  }
+
+  function abrirVehiculosMov() {
+    var m = state.mov;
+    if (!m.filas) return;
+    var internos = [];
+    m.filas.forEach(function (r) { if (internos.indexOf(r.interno) < 0) internos.push(r.interno); });
+    internos.sort(compararInternos);
+    var elegidos = m.filtro.vehiculos;
+    abrirHoja("Seleccionar vehículos",
+      '<div class="vehiculos-grid">' + internos.map(function (i) {
+        return '<label><input type="checkbox" value="' + esc(i) + '"' + (!elegidos.length || elegidos.indexOf(i) >= 0 ? " checked" : "") +
+          "> " + esc(i) + "</label>";
+      }).join("") + "</div>" +
+      '<div class="acciones"><button class="btn" type="button" id="vehTodos">Todos</button>' +
+      '<button class="btn" type="button" id="vehNinguno">Ninguno</button>' +
+      '<button class="btn btn-primario" type="button" id="vehAplicar">Aplicar</button></div>',
+      function (caja) {
+        function marcar(si) { Array.prototype.forEach.call(caja.querySelectorAll("input[type=checkbox]"), function (c) { c.checked = si; }); }
+        caja.querySelector("#vehTodos").addEventListener("click", function () { marcar(true); });
+        caja.querySelector("#vehNinguno").addEventListener("click", function () { marcar(false); });
+        caja.querySelector("#vehAplicar").addEventListener("click", function () {
+          var marcados = Array.prototype.map.call(caja.querySelectorAll("input[type=checkbox]:checked"), function (c) { return c.value; });
+          m.filtro.vehiculos = marcados.length === internos.length ? [] : marcados;     // ninguno o todos: sin filtro
+          cerrarHoja();
+          pintarMovilidad();
+        });
+      });
+  }
+
+  // ---------------------------------------------------------------- el Metro: los archivos del Mifare
+  // LiquidacionUsosTransporteMifare DD-MM-AAAA.xlsx (uno por día, o varios en un .zip), hoja "Liquidación Usos
+  // Transporte": un renglón por equipo (la placa del bus) y tipo de recorrido, con su "Total Cantidad", y arriba los
+  // tipos de usuario (adulto mayor, frecuentes, metro estándar...). Decidido el 15-oct-2026:
+  //   - cada archivo va al DÍA EN QUE SE USARON los pasajes, el que dice "Fecha de Uso de ...": el "01-10" trae del
+  //     30-sep 2:30 a. m. al 01-oct 2:29 a. m. (el nombre es el día de la liquidación), y eso es el 30-sep de Sonar;
+  //   - la placa se pasa a número de bus con las placas de Sonar (la tabla de los archivos tenía cambiados 708 con
+  //     757 y 723 con 751: el 757 no trabajó el 9 ni el 10 de octubre y "su" placa tuvo usos).
+  // Cargar otra vez el mismo día lo reemplaza: el bus que ya no sale en el archivo queda en 0.
+  function numeroMifare(x) { var v = Number(x); return isFinite(v) ? v : 0; }
+  function textoCelda(c) { return String(c == null ? "" : c).trim(); }
+
+  function leerMifare(bytes) {
+    var libro = XLSX.read(bytes, { type: "array" });
+    var filas = null, iCab = -1;
+    libro.SheetNames.some(function (nombre) {
+      var f = XLSX.utils.sheet_to_json(libro.Sheets[nombre], { header: 1, defval: null, raw: true });
+      var i = f.findIndex(function (r) {
+        var t = (r || []).map(textoCelda);
+        return t.indexOf("Equipo") >= 0 && t.indexOf("Total Cantidad") >= 0;
+      });
+      if (i < 0) return false;
+      filas = f;
+      iCab = i;
+      return true;
+    });
+    if (!filas) throw new Error("no tiene la hoja de la liquidación (con Equipo y Total Cantidad)");
+    var arriba = filas.slice(0, iCab).map(function (r) { return (r || []).map(textoCelda).join(" "); }).join(" ").replace(/\s+/g, " ");
+    var m = /Fecha de Uso de (\d{1,2})\/(\d{1,2})\/(\d{4})/i.exec(arriba);
+    if (!m) throw new Error("no dice de qué fecha son los usos (\"Fecha de Uso de ...\")");
+    var rango = (/Fecha de Uso de \S+ \S+ a \S+ \S+/i.exec(arriba) || [m[0]])[0];
+    var cab = filas[iCab].map(textoCelda);
+    var arribaCab = filas[iCab - 1] || [];
+    var iEq = cab.indexOf("Equipo"), iTot = cab.indexOf("Total Cantidad"), iEmp = cab.indexOf("Empresa"), iVal = cab.indexOf("Total Valor");
+    var tipos = [];
+    arribaCab.forEach(function (c, j) { if (textoCelda(c) && cab[j] === "Cantidad") tipos.push({ nombre: textoCelda(c), j: j }); });
+    var por = {}, total = 0;
+    filas.slice(iCab + 1).forEach(function (r) {
+      var placa = textoCelda(r && r[iEq]).toUpperCase();
+      if (!placa) return;                                         // el renglón de los totales
+      if (iEmp >= 0 && textoCelda(r[iEmp]) && textoCelda(r[iEmp]).toUpperCase() !== "COMBUSES") return;
+      var p = por[placa] || (por[placa] = { cantidad: 0, valor: 0, tipos: {} });
+      var c = numeroMifare(r[iTot]);
+      p.cantidad += c;
+      total += c;
+      if (iVal >= 0) p.valor += numeroMifare(r[iVal]);
+      tipos.forEach(function (t) { var x = numeroMifare(r[t.j]); if (x) p.tipos[t.nombre] = (p.tipos[t.nombre] || 0) + x; });
+    });
+    return { dia: m[3] + "-" + ("0" + m[2]).slice(-2) + "-" + ("0" + m[1]).slice(-2), rango: rango, por: por, total: total };
+  }
+
+  // Los .xlsx sueltos y los que vengan dentro de un .zip (la herramienta del Excel también abre el zip).
+  async function leerArchivosMifare(lista) {
+    var leidos = [], errores = [];
+    function uno(nombre, bytes) {
+      try {
+        leidos.push(Object.assign({ archivo: nombre }, leerMifare(bytes)));
+      } catch (err) {
+        errores.push(nombre + ": " + (err.message || err));
+      }
+    }
+    for (var i = 0; i < lista.length; i++) {
+      var f = lista[i];
+      var bytes = new Uint8Array(await f.arrayBuffer());
+      if (/\.zip$/i.test(f.name)) {
+        try {
+          var z = XLSX.CFB.read(bytes, { type: "array" });
+          var adentro = z.FileIndex.filter(function (e) { return /\.xlsx$/i.test(e.name) && e.content && e.content.length; });
+          if (!adentro.length) errores.push(f.name + ": no trae archivos .xlsx");
+          adentro.forEach(function (e) { uno(e.name, e.content); });
+        } catch (err) {
+          errores.push(f.name + ": no se pudo abrir el zip");
+        }
+      } else {
+        uno(f.name, bytes);
+      }
+    }
+    return { leidos: leidos, errores: errores };
+  }
+
+  // placa -> bus con las placas de Sonar (tarjeta_buses_dia), la del día más cercano.
+  async function placasDeSonar(dias) {
+    var desde = sumarDias(dias[0], -20), hasta = sumarDias(dias[dias.length - 1], 20);
+    var filas = await traerTodo(function () {
+      return client.from("tarjeta_buses_dia").select("dia,interno,placa").gte("dia", desde).lte("dia", hasta).order("dia").order("interno");
+    });
+    var porPlaca = {};
+    filas.forEach(function (f) {
+      if (!f.placa || f.interno === "PRUEBA") return;
+      var p = textoCelda(f.placa).toUpperCase();
+      (porPlaca[p] = porPlaca[p] || []).push({ dia: f.dia, interno: textoCelda(f.interno) });
+    });
+    return function (placa, dia) {
+      var mejor = null, lejos = Infinity;
+      (porPlaca[placa] || []).forEach(function (x) {
+        var d = Math.abs(diasEntre(x.dia, dia));
+        if (d < lejos) { lejos = d; mejor = x.interno; }
+      });
+      return mejor;
+    };
+  }
+
+  async function cargarMifare(lista) {
+    if (!window.XLSX) return aviso("No cargó la herramienta del Excel. Revise el internet y recargue.", "mal");
+    var boton = $("movMifare");
+    boton.disabled = true;
+    boton.textContent = "Leyendo los archivos…";
+    try {
+      var r = await leerArchivosMifare(lista);
+      var porDia = {}, errores = r.errores.slice();
+      r.leidos.sort(function (a, b) { return a.archivo.localeCompare(b.archivo); }).forEach(function (x) {
+        if (porDia[x.dia]) errores.push(x.archivo + ": es del mismo día que " + porDia[x.dia].archivo + " (se deja el primero)");
+        else porDia[x.dia] = x;
+      });
+      var dias = Object.keys(porDia).sort();
+      if (!dias.length) {
+        abrirHoja("Cargar el Metro (Mifare)", '<p class="error">No se pudo leer ningún archivo.</p><ul>' +
+          errores.map(function (e) { return "<li>" + esc(e) + "</li>"; }).join("") + "</ul>" +
+          '<div class="acciones"><button class="btn" type="button" data-cerrar-hoja>Cerrar</button></div>');
+        return;
+      }
+      var res = await Promise.all([
+        placasDeSonar(dias),
+        traerTodo(function () {
+          return client.from("movilidad_externos").select("dia,interno").eq("fuente", "metro").in("dia", dias).order("dia").order("interno");
+        }),
+      ]);
+      var busDe = res[0], yaHabia = {};
+      res[1].forEach(function (a) { (yaHabia[a.dia] = yaHabia[a.dia] || []).push(a.interno); });
+      var filas = [], resumen = [];
+      dias.forEach(function (dia) {
+        var x = porDia[dia], buses = {}, sinBus = [], usos = 0;
+        Object.keys(x.por).forEach(function (placa) {
+          var p = x.por[placa], interno = busDe(placa, dia);
+          if (!interno) { sinBus.push(placa + " (" + p.cantidad + ")"); return; }
+          var b = buses[interno] || (buses[interno] = { cantidad: 0, valor: 0, tipos: {}, placas: [] });
+          b.cantidad += p.cantidad;
+          b.valor += p.valor;
+          b.placas.push(placa);
+          Object.keys(p.tipos).forEach(function (t) { b.tipos[t] = (b.tipos[t] || 0) + p.tipos[t]; });
+          usos += p.cantidad;
+        });
+        Object.keys(buses).forEach(function (interno) {
+          var b = buses[interno];
+          filas.push({ dia: dia, interno: interno, fuente: "metro", cantidad: b.cantidad, archivo: x.archivo,
+            detalle: { placa: b.placas.join(", "), valor: b.valor, tipos: b.tipos, usos_de: x.rango } });
+        });
+        (yaHabia[dia] || []).forEach(function (interno) {
+          if (!buses[interno]) filas.push({ dia: dia, interno: interno, fuente: "metro", cantidad: 0, archivo: x.archivo,
+            detalle: { nota: "No sale en este archivo" } });
+        });
+        resumen.push({ dia: dia, archivo: x.archivo, rango: x.rango, usos: usos, buses: Object.keys(buses).length, sinBus: sinBus,
+          reemplaza: !!(yaHabia[dia] || []).length });
+      });
+      abrirHoja("Cargar el Metro (Mifare)",
+        '<p class="nota">Cada archivo va al día en que se usaron los pasajes (el que dice "Fecha de Uso de"), y la placa se pasa a ' +
+          "bus con las placas de Sonar. Cargar otra vez un día lo reemplaza.</p>" +
+        '<div class="tabla-caja"><table><thead><tr><th>Día de uso</th><th>Archivo</th><th class="n">Usos</th><th class="n">Buses</th><th></th></tr></thead><tbody>' +
+        resumen.map(function (s) {
+          return "<tr><td><strong>" + esc(fechaCorta(s.dia)) + '</strong><span class="menor">' + esc(diaSemana(s.dia)) + "</span></td><td>" +
+            esc(s.archivo) + '<span class="menor">' + esc(s.rango) + '</span></td><td class="n">' + miles(s.usos) + '</td><td class="n">' + s.buses +
+            "</td><td>" + (s.reemplaza ? chip("revisa", "Reemplaza lo cargado") : "") +
+            (s.sinBus.length ? chip("mal", "Placas sin bus en Sonar: " + s.sinBus.join(", ")) : "") + "</td></tr>";
+        }).join("") + "</tbody></table></div>" +
+        (errores.length ? '<p class="error">No se cargan:</p><ul>' + errores.map(function (e) { return "<li>" + esc(e) + "</li>"; }).join("") + "</ul>" : "") +
+        '<p id="mifareError" class="error" hidden></p>' +
+        '<div class="acciones"><button class="btn btn-primario" type="button" id="mifareGuardar">Guardar ' + dias.length +
+          (dias.length === 1 ? " día" : " días") + "</button>" +
+        '<button class="btn" type="button" data-cerrar-hoja>Cancelar</button></div>',
+        function (caja) {
+          caja.querySelector("#mifareGuardar").addEventListener("click", async function () {
+            var b = this;
+            b.disabled = true;
+            b.textContent = "Guardando…";
+            try {
+              for (var i = 0; i < filas.length; i += 500) {
+                var r2 = await conTiempo(client.from("movilidad_externos").upsert(filas.slice(i, i + 500), { onConflict: "dia,interno,fuente" }));
+                if (r2.error) throw r2.error;
+              }
+              cerrarHoja();
+              aviso("Metro cargado: " + dias.length + (dias.length === 1 ? " día, " : " días, ") +
+                miles(resumen.reduce(function (s, x) { return s + x.usos; }, 0)) + " usos.");
+              var m = state.mov;
+              if (m.desde && dias.some(function (d) { return d >= m.desde && d <= m.hasta; })) cargarMovilidad();
+            } catch (err) {
+              $("mifareError").textContent = "No se guardó: " + textoError(err);
+              $("mifareError").hidden = false;
+              b.disabled = false;
+              b.textContent = "Guardar otra vez";
+            }
+          });
+        });
+    } catch (err) {
+      aviso("No se pudieron leer los archivos del Mifare: " + textoError(err), "mal");
+    } finally {
+      boton.disabled = false;
+      boton.textContent = "Cargar Mifare";
+    }
   }
 
   function abrirAjusteMov(interno, dia) {
@@ -2089,10 +2434,10 @@
       });
   }
 
-  // El día como número de Excel (días desde el 30-dic-1899), para que la columna Fecha sea fecha de verdad.
-  function serialExcel(dia) {
+  // El día como fecha de Excel: medianoche UTC, que ExcelJS escribe como el número del día, sin correrlo.
+  function fechaExcel(dia) {
     var p = dia.split("-").map(Number);
-    return (Date.UTC(p[0], p[1] - 1, p[2]) - Date.UTC(1899, 11, 30)) / (24 * HORA_MS);
+    return new Date(Date.UTC(p[0], p[1] - 1, p[2]));
   }
 
   function baseNumero(base) {
@@ -2100,48 +2445,159 @@
     return x ? Number(x[1]) : base ? "SIN BASE" : "";
   }
 
-  // El renglón como va en la Base de datos de Movilidad 2026 (las mismas 25 columnas, en el mismo orden).
-  function filaMovilidad(r) {
-    var f = new Date(r.dia + "T12:00:00Z");
-    return [r.interno, r.ingresos, null, r.salidas, 0, r.salidas, r.dif, MOV_RUTA, serialExcel(r.dia), MESES[f.getUTCMonth()],
-      f.getUTCFullYear(), DIAS_SEMANA[f.getUTCDay()], baseNumero(r.base), r.ajuste, r.sinRuta, null, r.metro, r.descuento, null,
-      r.observaciones || null, r.sonar, r.viajes, null, null, r.faltante ? "Vehículo faltante" : null];
+  function vehiculoMov(interno) { return MOV_SIN_ESPACIO.indexOf(interno) >= 0 ? interno : interno + " "; }
+
+  // La hoja Base de datos como la de Movilidad 2026: los mismos anchos, los colores del encabezado (los del tema de
+  // ese Excel, ya calculados), la letra, los bordes, el filtro y la Dif en rojo cuando pasa de 30 o de 50.
+  var MOV_ANCHOS = [10.89, 18.44, 13, 11.66, 12.11, 12.89, 5.11, 6.33, 11.33, 7.89, 6.44, 10.89, 7.33, 7.66, 10, 8, 15.55,
+    13.55, 10.89, 40.44, 8, 18.33, 12.44, 8.44, 28.89];
+  var MOV_RELLENO = { 5: "FFFFFF", 10: "FFFFFF", 11: "FFFFFF", 12: "FFFFFF", 13: "FFFFFF", 15: "83CBEB", 16: "FFFF00", 17: "B4E5A2",
+    18: "D86ECC" };   // columna (A = 1): color
+  var BORDE_FINO = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "thin" } };
+
+  function hojaBaseDeDatos(libro, filas) {
+    var ws = libro.addWorksheet("Base de datos", { views: [{ state: "frozen", ySplit: 1, zoomScale: 115 }] });
+    MOV_ANCHOS.forEach(function (a, i) { ws.getColumn(i + 1).width = a; });
+    var cab = ws.addRow(MOV_COLUMNAS);
+    for (var i = 1; i <= MOV_COLUMNAS.length; i++) {
+      var c = cab.getCell(i);
+      c.font = { name: "Calibri", size: i === 20 ? 10 : 11, bold: i <= 20, color: { argb: "FF000000" } };
+      c.alignment = { horizontal: i === 20 ? "left" : "center", vertical: i <= 9 ? "top" : i === 13 ? "middle" : undefined, wrapText: true };
+      c.border = BORDE_FINO;
+      if (MOV_RELLENO[i]) c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + MOV_RELLENO[i] } };
+    }
+    // Las fórmulas son la regla: si en el Excel cambian un ajuste o los viajes, se recalcula todo el renglón.
+    filas.forEach(function (r) {
+      var k = ws.rowCount + 1;
+      var f = new Date(r.dia + "T12:00:00Z");
+      var fila = ws.addRow([
+        vehiculoMov(r.interno),
+        formula("U" + k + "-R" + k + "-V" + k + "-N" + k, r.ingresos),     // Ingresos = Sonar - Desc>20 - Viajes - Ajustes
+        null,
+        r.salidasP1,
+        r.salidasP2,
+        formula("D" + k + "+E" + k + "-V" + k + "-N" + k, r.salidas),       // Total salidas = P1 + P2 - Viajes - Ajustes
+        formula("B" + k + "-F" + k, r.dif),                                // Dif = Ingresos - Total salidas
+        MOV_RUTA,
+        fechaExcel(r.dia),
+        MESES[f.getUTCMonth()],
+        f.getUTCFullYear(),
+        DIAS_SEMANA[f.getUTCDay()],
+        baseNumero(r.base),
+        r.ajuste,
+        r.sinRuta,
+        null,
+        r.metro,
+        r.descuento,
+        null,
+        r.observaciones || "",
+        r.sonar,
+        r.viajesReal,
+        "",
+        null,
+        r.faltante ? "Vehículo faltante" : "",
+      ]);
+      for (var j = 1; j <= MOV_COLUMNAS.length; j++) {
+        var x = fila.getCell(j);
+        x.font = { name: j === 6 || j === 7 ? "Calibri" : "Aptos Narrow", size: 11 };
+        x.alignment = { horizontal: j === 20 ? "left" : "center" };
+        x.border = BORDE_FINO;
+      }
+      fila.getCell(9).numFmt = "mm-dd-yy";
+    });
+    ws.autoFilter = "A1:Y" + Math.max(2, ws.rowCount);
+    ws.addConditionalFormatting({
+      ref: "G2:G1048576",
+      rules: [50, 30].map(function (tope, i) {
+        return { type: "cellIs", operator: "greaterThan", formulae: [String(tope)], priority: i + 1,
+          style: { font: { color: { argb: "FF9C0006" } }, fill: { type: "pattern", pattern: "solid", bgColor: { argb: "FFFFC7CE" } } } };
+      }),
+    });
   }
 
-  function excelMovilidad() {
-    if (!window.XLSX) return aviso("No cargó la herramienta del Excel. Revise el internet y recargue.", "mal");
-    var m = state.mov;
-    if (!m.filas || !m.filas.length) return;
-    var datos = [MOV_COLUMNAS].concat(m.filas.map(filaMovilidad));
-    var hoja = XLSX.utils.aoa_to_sheet(datos);
-    for (var i = 1; i < datos.length; i++) {
-      var celda = hoja[XLSX.utils.encode_cell({ r: i, c: 8 })];
-      if (celda) celda.z = "m/d/yy";
-    }
-    hoja["!cols"] = MOV_COLUMNAS.map(function (t) { return { wch: t === "Observaciones" ? 34 : Math.max(9, String(t || "").length + 2) }; });
-    var libro = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(libro, hoja, "Base de datos");
-    XLSX.utils.book_append_sheet(libro, hojaDe(resumenMovilidadPorDia(m.filas).map(function (d) {
-      return { "Fecha": d.dia, "Buses": d.buses, "Trabajaron": d.trabajaron, "Viajes": d.viajes, "Sin despacho": d.sd, "Sonar": d.sonar,
-        "Sin ruta": d.sinRuta == null ? "" : d.sinRuta, "Descuento>20 (tope 19)": d.descuento, "Ajustes": d.ajuste, "De ellos gestores": d.gestores,
-        "Ingresos totales": d.ingresos, "Total salidas": d.salidas, "Dif": d.dif, "Pasajeros metro": d.metro == null ? "" : d.metro };
-    })), "Resumen por día");
-    var ajustes = (m.datos.ajustes || []).map(function (a) {
-      return { "Día": a.dia, "Bus": a.interno, "Cantidad": a.cantidad, "Motivo": a.motivo, "Nota": a.nota || "",
-        "Escribió": a.escrita_por_correo || "", "Cuándo": momento(a.escrita_en),
-        "Anulado": a.anulado_en ? (a.anulado_motivo || "") + " (" + (a.anulado_por_correo || "") + ", " + momento(a.anulado_en) + ")" : "" };
+  // El resumen por día sale de la Base de datos con fórmulas (SUMAR.SI.CONJUNTO): si la cambian, también cambia.
+  function hojaResumenMovilidad(libro, filas) {
+    var cols = [["Buses", null], ["Viajes realizados", "V"], ["Sonar ", "U"], ["Sin ruta", "O"], ["Descuento>20", "R"],
+      ["Ajustes", "N"], ["Ingresos totales", "B"], ["Salidas P1", "D"], ["Total salidas", "F"], ["Dif", "G"], ["Pasajeros metro", "Q"]];
+    var R = hojaVaV(libro, "Resumen por día", ["Fecha", "Día"].concat(cols.map(function (c) { return c[0].trim(); })));
+    var BD = "'Base de datos'!";
+    var dias = resumenMovilidadPorDia(filas);
+    var primera = 2;
+    dias.forEach(function (d) {
+      var k = R.ultima + 1;
+      var valores = { "Buses": d.buses, "V": d.viajesReal, "U": d.sonar, "O": d.sinRuta, "R": d.descuento, "N": d.ajuste, "B": d.ingresos,
+        "D": d.salidasP1, "F": d.salidas, "G": d.dif, "Q": d.metro };
+      R.poner([fechaExcel(d.dia), diaSemana(d.dia)].concat(cols.map(function (c) {
+        return c[1] ? formula("SUMIFS(" + BD + "$" + c[1] + ":$" + c[1] + "," + BD + "$I:$I,$A" + k + ")", n(valores[c[1]]))
+          : formula("COUNTIFS(" + BD + "$I:$I,$A" + k + ")", valores.Buses);
+      })));
+      R.ws.getRow(k).getCell(1).numFmt = "dd/mm/yyyy";
     });
-    XLSX.utils.book_append_sheet(libro, hojaDe(ajustes.length ? ajustes : [{ "Ajustes": "Ninguno entre esas fechas" }], { "Nota": 30, "Anulado": 40 }), "Ajustes");
-    XLSX.utils.book_append_sheet(libro, hojaDe([
-      "Movilidad de la ruta " + MOV_RUTA + " sacada del Portal de Control: un renglón por bus y día, como la hoja Base de datos de Movilidad 2026.",
-      "Sonar: todo lo que contó la puerta entrando en el día, en los viajes y fuera de ellos.",
-      "Sin ruta: lo que entró fuera de los viajes (en la ruta sin viaje, y en el patio o el taller). No son pasajeros.",
-      "Descuento>20: lo que pasó del tope de 19 pasajeros en cada viaje (la regla de la tarjeta).",
-      "Ajustes: los que escribieron los despachadores en Control (despachador, taller, administrativo...) más los gestores que subieron con su código.",
-      "Ingresos totales = Sonar - Sin ruta - Descuento>20 - Ajustes. Total salidas = lo que bajó en los viajes - Descuento>20 - Ajustes. Dif = Ingresos - Salidas.",
-      "Salidas P2 va en 0: el sensor no separa las puertas. Viajes realizados cuenta también los viajes sin despacho.",
-    ].map(function (t) { return { "Cómo se lee": t }; }), { "Cómo se lee": 140 }), "Notas");
-    XLSX.writeFile(libro, "movilidad_" + MOV_RUTA + "_" + m.desde + "_a_" + m.hasta + ".xlsx");
+    var ultima = R.ultima;
+    if (dias.length) {
+      var t = resumenMovilidadPorDia(filas.map(function (r) { return Object.assign({}, r, { dia: "todo" }); }))[0];
+      var totales = { "Buses": t.buses, "V": t.viajesReal, "U": t.sonar, "O": t.sinRuta, "R": t.descuento, "N": t.ajuste, "B": t.ingresos,
+        "D": t.salidasP1, "F": t.salidas, "G": t.dif, "Q": t.metro };
+      R.poner(["Total", null].concat(cols.map(function (c, i) {
+        var letra = String.fromCharCode(67 + i);       // las columnas del resumen: C, D, E...
+        return formula("SUM(" + letra + primera + ":" + letra + ultima + ")", n(totales[c[1] || "Buses"]));
+      })), COLOR_VAV.azul, true);
+    }
+    R.cerrar();
+    R.ws.getColumn(1).width = 12;
+  }
+
+  async function excelMovilidad() {
+    var m = state.mov;
+    if (!m.filas || !m.filas.length || m.armandoExcel) return;
+    var boton = $("movExcel");
+    m.armandoExcel = true;
+    boton.disabled = true;
+    boton.textContent = "Armando el Excel…";
+    try {
+      var ExcelJS = await cargarExcelJS();
+      var libro = new ExcelJS.Workbook();
+      libro.creator = "Portal de Control · Combuses";
+      libro.calcProperties.fullCalcOnLoad = true;
+      hojaBaseDeDatos(libro, m.filas);
+      hojaResumenMovilidad(libro, m.filas);
+      var A = hojaVaV(libro, "Ajustes", ["Día", "Bus", "Cantidad", "Motivo", "Nota", "Escribió", "Cuándo", "Anulado"]);
+      var ajustes = m.datos.ajustes || [];
+      if (!ajustes.length) A.poner(["Ninguno entre esas fechas"]);
+      ajustes.forEach(function (a) {
+        A.poner([a.dia, a.interno, a.cantidad, a.motivo, a.nota || "", a.escrita_por_correo || "", momento(a.escrita_en),
+          a.anulado_en ? (a.anulado_motivo || "") + " (" + (a.anulado_por_correo || "") + ", " + momento(a.anulado_en) + ")" : ""]);
+      });
+      A.cerrar();
+      var N = libro.addWorksheet("Notas");
+      [
+        "Movilidad de la ruta " + MOV_RUTA + " sacada del Portal de Control, del " + m.desde + " al " + m.hasta +
+          ": un renglón por bus y día, como la hoja Base de datos de Movilidad 2026 (las mismas 25 columnas, en el mismo orden).",
+        "Con la regla de la plantilla 700control. Van con fórmula, y se recalculan si cambia un número del renglón:",
+        "   Ingresos totales (B) = Sonar (U) - Descuento>20 (R) - Viajes realizados (V) - Ajustes (N)",
+        "   Total salidas (F) = Salidas P1 (D) + Salidas P2 (E) - Viajes realizados (V) - Ajustes (N)",
+        "   Dif (G) = Ingresos totales (B) - Total salidas (F)",
+        "Sonar: todo lo que contó la puerta entrando en el día, en los viajes y fuera del viaje a viaje.",
+        "Sin ruta: lo que entró fuera del viaje a viaje (en la ruta sin viaje, y en el patio o el taller). Ya va dentro de Sonar y de los ingresos: la columna solo lo muestra.",
+        "Salidas P1: lo que contó bajando en los viajes más lo que bajó fuera de ellos. Salidas P2 va en 0: el sensor no separa las puertas.",
+        "Descuento>20 va en 0: sin tope por viaje.",
+        "Ajustes: los que escribieron los despachadores en Control (taller, administrativo, despachador...), más los gestores que subieron con su código y lo que control corrigió en un viaje.",
+        "Viajes realizados: los viajes con despacho. Los sin despacho Sonar los pone como \"sin ruta\": su gente suma en Sonar, pero no restan 1.",
+        "Pasajeros metro: los usos de la tarjeta Mifare (cívica) de ese bus, del archivo de la liquidación. Cada archivo va al día en que se usaron los pasajes (el \"01-10\" trae los del 30 de septiembre) y la placa se pasa a bus con las placas de Sonar.",
+        "El bus va como texto y con un espacio al final (\"703 \"), menos el 710 y el 756, igual que en Movilidad 2026.",
+        "La hoja Resumen por día suma la Base de datos con fórmulas.",
+      ].forEach(function (t) { N.addRow([t]); });
+      N.getColumn(1).width = 140;
+      var datos = await libro.xlsx.writeBuffer();
+      descargar(new Blob([datos], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+        "movilidad_" + MOV_RUTA + "_" + m.desde + "_a_" + m.hasta + ".xlsx");
+    } catch (err) {
+      aviso("No se pudo armar el Excel: " + textoError(err), "mal");
+    } finally {
+      m.armandoExcel = false;
+      boton.textContent = "Descargar Excel";
+      boton.disabled = !(m.filas && m.filas.length);
+    }
   }
 
   // ---------------------------------------------------------------- Excel e imprimir
@@ -2903,6 +3359,23 @@
       else location.hash = nuevo;
     });
     $("movExcel").addEventListener("click", excelMovilidad);
+    // Los filtros de la Base de datos, como en 700control
+    $("movDia").addEventListener("change", function () { state.mov.filtro.dia = this.value; pintarMovilidad(); });
+    $("movBase").addEventListener("change", function () { state.mov.filtro.base = this.value; pintarMovilidad(); });
+    $("movDifNeg").addEventListener("click", function () { state.mov.filtro.difNeg = !state.mov.filtro.difNeg; pintarMovilidad(); });
+    $("movMetro20").addEventListener("click", function () { state.mov.filtro.metro20 = !state.mov.filtro.metro20; pintarMovilidad(); });
+    $("movBuscar").addEventListener("input", function () { state.mov.filtro.texto = this.value; pintarTablaMov(); });
+    $("movVehiculos").addEventListener("click", abrirVehiculosMov);
+    $("movMifare").addEventListener("click", function () { $("movMifareArchivo").click(); });
+    $("movMifareArchivo").addEventListener("change", function () {
+      var lista = Array.prototype.slice.call(this.files || []);
+      this.value = "";                                        // para poder escoger el mismo archivo otra vez
+      if (lista.length) cargarMifare(lista);
+    });
+    $("movLimpiar").addEventListener("click", function () { state.mov.filtro = filtroMovVacio(); pintarMovilidad(); });
+    $("movCuerpo").addEventListener("toggle", function (ev) {
+      if (ev.target.id === "movResumen") state.mov.resumenAbierto = ev.target.open;
+    }, true);
 
     // Clics dentro de las tablas y la tarjeta
     document.addEventListener("click", function (ev) {
@@ -2935,7 +3408,7 @@
       if (t.closest("a, input, textarea, select, form")) return;
       if ((el = t.closest("tr[data-mov-dia]"))) {
         var dia = el.getAttribute("data-mov-dia");
-        state.mov.abierto = state.mov.abierto === dia ? null : dia;
+        state.mov.filtro.dia = state.mov.filtro.dia === dia ? "" : dia;     // el mismo otra vez: todos los días
         return pintarMovilidad();
       }
       if ((el = t.closest("tr[data-viaje]"))) {
