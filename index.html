@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Control · Combuses</title>
+  <meta name="description" content="Las tarjetas de despacho de todos los buses: viajes, pasajeros, plata, avisos e informes.">
+  <meta name="theme-color" content="#0b6b3a">
+  <meta name="robots" content="noindex">
+
+  <!-- Aplicación instalable (PWA) -->
+  <link rel="manifest" href="./manifest.webmanifest">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Control">
+  <link rel="icon" type="image/png" sizes="64x64" href="./assets/favicon-64.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="./assets/apple-touch-icon.png">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="./css/control.css?v=0.4.0">
+</head>
+<body>
+
+<!-- ============ Entrar ============ -->
+<main id="vistaEntrar" class="entrar" hidden>
+  <form id="formEntrar" class="entrar-caja" novalidate>
+    <p class="marca"><span class="marca-punto"></span>Combuses</p>
+    <h1>Control de tarjetas</h1>
+    <p class="entrar-sub">Los viajes, los pasajeros y la plata de cada bus.</p>
+    <label class="campo">
+      <span>Correo</span>
+      <input id="entrarCorreo" type="email" autocomplete="username" required>
+    </label>
+    <label class="campo">
+      <span>Clave</span>
+      <input id="entrarClave" type="password" autocomplete="current-password" required>
+    </label>
+    <p id="entrarError" class="error" role="alert" hidden></p>
+    <button id="btnEntrar" class="btn btn-primario btn-bloque" type="submit">Entrar</button>
+    <p id="entrarVersion" class="entrar-version"></p>
+  </form>
+</main>
+
+<!-- ============ La aplicación ============ -->
+<div id="app" hidden>
+  <header class="barra">
+    <p class="marca"><span class="marca-punto"></span>Combuses <b>Control</b></p>
+    <nav class="pestanas" aria-label="Secciones">
+      <a href="#/dia" data-pestana="dia">Día</a>
+      <a href="#/bus" data-pestana="bus">Tarjeta del bus</a>
+      <a href="#/informes" data-pestana="informes">Informes</a>
+    </nav>
+    <div class="quien">
+      <span id="quienCorreo" class="quien-correo"></span>
+      <span id="quienRol" class="chip"></span>
+      <button id="btnInstalar" class="btn btn-sutil btn-chico" type="button" title="Dejarlo como aplicación en este PC" hidden>Instalar</button>
+      <button id="btnSalir" class="btn btn-sutil btn-chico" type="button">Salir</button>
+    </div>
+  </header>
+
+  <main class="contenido">
+
+    <!-- ---- Día: todos los buses ---- -->
+    <section id="vistaDia" class="vista" hidden>
+      <div class="cabeza">
+        <div>
+          <h1>Tarjetas del día</h1>
+          <p id="diaSub" class="sub"></p>
+        </div>
+        <div class="controles">
+          <button id="diaAntes" class="btn btn-sutil btn-cuadro" type="button" title="Día anterior" aria-label="Día anterior">‹</button>
+          <input id="diaFecha" type="date" aria-label="Día">
+          <button id="diaDespues" class="btn btn-sutil btn-cuadro" type="button" title="Día siguiente" aria-label="Día siguiente">›</button>
+          <button id="diaHoy" class="btn btn-sutil" type="button">Hoy</button>
+          <button id="diaActualizar" class="btn" type="button">Actualizar</button>
+        </div>
+      </div>
+      <div id="diaTotales" class="totales"></div>
+      <div id="diaAvisos"></div>
+      <div id="diaBases" class="bases"></div>
+      <div class="filtros">
+        <input id="diaBuscar" type="search" placeholder="Buscar bus, placa o conductor" aria-label="Buscar">
+        <div id="diaFiltros" class="chips-filtro" role="group" aria-label="Mostrar">
+          <button type="button" data-filtro="todos" aria-pressed="true">Todos</button>
+          <button type="button" data-filtro="aviso" aria-pressed="false">Con aviso</button>
+          <button type="button" data-filtro="no_cuadra" aria-pressed="false">No cuadran</button>
+          <button type="button" data-filtro="revisar" aria-pressed="false">Por revisar</button>
+          <button type="button" data-filtro="falta" aria-pressed="false">Falta algo</button>
+          <button type="button" data-filtro="sin_despacho" aria-pressed="false">Sin despacho</button>
+        </div>
+        <select id="diaBase" aria-label="Base" hidden><option value="">Todas las bases</option></select>
+        <select id="diaRuta" aria-label="Ruta"><option value="">Todas las rutas</option></select>
+      </div>
+      <div id="diaTabla" class="tabla-caja"></div>
+      <p id="diaPie" class="pie"></p>
+    </section>
+
+    <!-- ---- La tarjeta de un bus ---- -->
+    <section id="vistaBus" class="vista" hidden>
+      <div class="cabeza">
+        <div>
+          <a id="busVolver" class="volver" href="#/dia">‹ Volver al día</a>
+          <h1 id="busTitulo">Tarjeta del bus</h1>
+          <p id="busSub" class="sub"></p>
+        </div>
+        <form id="busForm" class="controles" novalidate>
+          <input id="busNumero" list="busLista" placeholder="Bus" inputmode="numeric" autocomplete="off" aria-label="Bus" size="6">
+          <datalist id="busLista"></datalist>
+          <input id="busFecha" type="date" aria-label="Día">
+          <button class="btn" type="submit">Ver</button>
+          <button id="busExcel" class="btn btn-sutil" type="button" disabled>Excel</button>
+          <button id="busImprimir" class="btn btn-sutil" type="button" disabled>Imprimir</button>
+        </form>
+      </div>
+      <div id="busCuerpo"></div>
+    </section>
+
+    <!-- ---- Informes por fechas ---- -->
+    <section id="vistaInformes" class="vista" hidden>
+      <div class="cabeza">
+        <div>
+          <h1>Informes</h1>
+          <p class="sub">Viajes, pasajeros y plata entre dos fechas, por bus, conductor, ruta, día o base.</p>
+        </div>
+      </div>
+      <form id="infForm" class="inf-form" novalidate>
+        <label class="campo"><span>Desde</span><input id="infDesde" type="date" required></label>
+        <label class="campo"><span>Hasta</span><input id="infHasta" type="date" required></label>
+        <label class="campo"><span>Agrupar por</span>
+          <select id="infPor">
+            <option value="interno">Bus</option>
+            <option value="conductor">Conductor</option>
+            <option value="ruta">Ruta</option>
+            <option value="dia">Día</option>
+            <option value="base">Base</option>
+          </select>
+        </label>
+        <label class="campo" hidden><span>Base</span>
+          <select id="infBase"><option value="">Todas las bases</option></select>
+        </label>
+        <button class="btn btn-primario" type="submit">Consultar</button>
+        <button id="infExcel" class="btn btn-sutil" type="button" disabled>Descargar Excel</button>
+      </form>
+      <div id="infCuerpo"></div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ============ Hoja (corregir, revisar un daño, ver la foto) ============ -->
+<div id="hoja" class="hoja-fondo" hidden>
+  <div class="hoja" role="dialog" aria-modal="true" aria-labelledby="hojaTitulo">
+    <div class="hoja-cabeza">
+      <h2 id="hojaTitulo"></h2>
+      <button id="hojaCerrar" class="btn btn-sutil btn-cuadro" type="button" aria-label="Cerrar">×</button>
+    </div>
+    <div id="hojaCuerpo"></div>
+  </div>
+</div>
+
+<div id="aviso" class="aviso" role="status" hidden></div>
+
+<!-- Versión nueva publicada: se activa cuando la persona toca Actualizar -->
+<div id="nuevaVersion" class="nueva-version" role="status" hidden>
+  <span id="nuevaVersionTexto">Hay una versión nueva del portal.</span>
+  <button id="btnActualizar" class="btn btn-chico" type="button">Actualizar</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="./js/control-config.js?v=0.4.0"></script>
+<script src="./js/control.js?v=0.4.0"></script>
+</body>
+</html>

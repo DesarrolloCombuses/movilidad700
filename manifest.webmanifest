@@ -1,0 +1,56 @@
+{
+  "id": "/movilidad700/",
+  "name": "Control de tarjetas · Combuses",
+  "short_name": "Control",
+  "description": "Las tarjetas de despacho de todos los buses: viajes, pasajeros, plata, avisos e informes en Excel.",
+  "start_url": "./index.html?source=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#eef2ec",
+  "theme_color": "#0b6b3a",
+  "lang": "es-CO",
+  "dir": "ltr",
+  "categories": ["productivity", "business"],
+  "icons": [
+    {
+      "src": "./assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Tarjetas del día",
+      "short_name": "Día",
+      "url": "./index.html#/dia",
+      "icons": [{ "src": "./assets/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Tarjeta de un bus",
+      "short_name": "Bus",
+      "url": "./index.html#/bus",
+      "icons": [{ "src": "./assets/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Informes",
+      "short_name": "Informes",
+      "url": "./index.html#/informes",
+      "icons": [{ "src": "./assets/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

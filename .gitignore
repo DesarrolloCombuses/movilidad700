@@ -1,0 +1,10 @@
+# Nada de claves ni archivos del PC
+*.ini
+*.env
+.env*
+claves*
+*.log
+*.zip
+.vscode/
+Thumbs.db
+desktop.ini
