@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./css/control.css?v=0.9.2">
+  <link rel="stylesheet" href="./css/control.css?v=0.9.3">
 </head>
 <body>
 
@@ -159,6 +159,71 @@
           <p id="movSub" class="sub">Un renglón por bus y día, como la Base de datos de Movilidad 2026.</p>
         </div>
       </div>
+      <!-- La ayuda: cómo sale cada número y cómo se carga el Metro (lo pidió el usuario el 15-oct-2026) -->
+      <details class="mov-ayuda" id="movAyuda">
+        <summary>¿Cómo funciona la movilidad y cómo se carga el Metro?</summary>
+        <div class="mov-ayuda-cuerpo">
+          <h3>1. Cómo sale cada número (por bus y por día)</h3>
+          <div class="tabla-ayuda-caja">
+            <table class="tabla-ayuda">
+              <tbody>
+                <tr><th scope="row">Sonar</th><td>Todo lo que contó la puerta entrando en el día: en los viajes y fuera de ellos.</td></tr>
+                <tr><th scope="row">Viajes realizados</th><td>Los viajes con despacho. Cada viaje resta 2.</td></tr>
+                <tr><th scope="row">Pasajeros metro</th><td>Los usos de la tarjeta del Metro (Mifare) de ese bus ese día. Llegan con la plantilla metro (punto 2).</td></tr>
+                <tr><th scope="row">Ajustes</th><td>Los que escriben los despachadores con <strong>+ Ajuste</strong>, más los gestores que subieron con su código y lo que control corrigió en un viaje.</td></tr>
+                <tr><th scope="row">Descuento&gt;20</th><td>Va en 0.</td></tr>
+                <tr><th scope="row">Ingresos totales</th><td><strong>Sonar − Pasajeros metro − 2 × Viajes realizados − Ajustes</strong></td></tr>
+                <tr><th scope="row">Salidas P1</th><td>Lo que contó bajando, en los viajes y fuera de ellos. Salidas P2 va en 0 (el sensor no separa las puertas).</td></tr>
+                <tr><th scope="row">Total salidas</th><td><strong>Salidas P1 + Salidas P2 − Pasajeros metro − 2 × Viajes realizados − Ajustes</strong></td></tr>
+                <tr><th scope="row">Dif</th><td>Ingresos totales − Total salidas. Sale en rojo cuando pasa de 30.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="ejemplo"><strong>Ejemplo, el 703 del 1 de octubre:</strong> Sonar 163, 9 viajes con despacho, 9 de Metro y sin ajustes.
+            Ingresos totales = 163 − 9 − (2 × 9 = 18) = <strong>136</strong>.</p>
+          <p>Si un día todavía no tiene el Metro cargado, esa columna sale vacía y no resta nada.</p>
+
+          <h3>2. Cargar el Metro (se hace a mano)</h3>
+          <p>Nada se sube solo: si nadie carga el Metro de un día, ese día no lo resta. Lo cargan los despachadores (a ellos les sale el botón <strong>Cargar Metro</strong>).</p>
+          <ol>
+            <li>Arme la <strong>plantilla metro</strong> en Excel: una hoja con estas tres columnas y un renglón por bus y día.
+              <div class="tabla-ayuda-caja">
+                <table class="tabla-ayuda tabla-plantilla">
+                  <thead><tr><th>fecha</th><th>vehiculo</th><th>total</th></tr></thead>
+                  <tbody>
+                    <tr><td>01/10/2026</td><td>703</td><td>9</td></tr>
+                    <tr><td>01/10/2026</td><td>705</td><td>3</td></tr>
+                    <tr><td>01/10/2026</td><td>707</td><td>4</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              La <strong>fecha</strong> es el día de la movilidad: el archivo del Mifare "01-10" va con fecha 01/10/2026. Puede traer uno o varios días.</li>
+            <li>Toque <strong>Cargar Metro</strong> y escoja la plantilla (puede escoger varias a la vez).</li>
+            <li>Antes de guardar le muestra cada día con sus usos, sus buses y los avisos. Revíselo.</li>
+            <li>Toque <strong>Guardar</strong>. La tabla se actualiza sola.</li>
+          </ol>
+          <p><strong>Cómo cruza con la movilidad:</strong> cada renglón se une con el bus y el día. "01/10/2026, 703, 9" va al 703 del 1 de octubre,
+            y ese 9 se resta de los Ingresos totales y del Total salidas. Los buses que trabajaron ese día y no salen en la plantilla quedan con Metro 0.</p>
+          <p><strong>Los avisos antes de guardar:</strong></p>
+          <ul>
+            <li><em>Reemplaza lo cargado:</em> ese día ya tenía Metro. Lo nuevo lo reemplaza completo.</li>
+            <li><em>No están en Sonar ese día:</em> ese número de bus no aparece ese día. Revise que esté bien escrito.</li>
+            <li><em>Con Metro y sin viajes ese día:</em> el bus no hizo viajes y tiene usos. Puede ser un bus cambiado en la tabla de placas.</li>
+            <li>Si un renglón no tiene bien la fecha, el vehículo o el total, ese archivo no se carga y le dice qué renglón corregir.</li>
+          </ul>
+          <p><strong>Para corregir:</strong> arregle la plantilla y vuelva a cargarla. El día queda con lo nuevo.</p>
+          <p>También recibe los archivos <em>LiquidacionUsosTransporteMifare</em> tal como llegan, sueltos o en el .zip. Cada uno va al día de su nombre,
+            y la placa se pasa a número de bus con las placas de Sonar.</p>
+
+          <h3>3. Ajustes y Excel</h3>
+          <ul>
+            <li><strong>+ Ajuste</strong> en el renglón del bus (solo despachadores): cuántas personas y el motivo (Taller, Administrativo, Despachador, u Otro con una nota).
+              No se borra: se anula diciendo el porqué, y queda quién y cuándo.</li>
+            <li><strong>Descargar Excel:</strong> la hoja Base de datos igual a la de Movilidad 2026, con las fórmulas de Ingresos totales, Total salidas y Dif.
+              Si cambia un número en el Excel, se recalcula.</li>
+          </ul>
+        </div>
+      </details>
       <form id="movForm" class="inf-form" novalidate>
         <label class="campo"><span>Desde</span><input id="movDesde" type="date" required></label>
         <label class="campo"><span>Hasta</span><input id="movHasta" type="date" required></label>
@@ -226,7 +291,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="./js/control-config.js?v=0.9.2"></script>
-<script src="./js/control.js?v=0.9.2"></script>
+<script src="./js/control-config.js?v=0.9.3"></script>
+<script src="./js/control.js?v=0.9.3"></script>
 </body>
 </html>

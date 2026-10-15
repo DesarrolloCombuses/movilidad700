@@ -2381,9 +2381,10 @@
           noEsta: noEsta, sinViajes: sinViajes, reemplaza: !!(yaHabia[dia] || []).length });
       });
       abrirHoja("Cargar el Metro",
-        '<p class="nota">La plantilla metro (fecha, vehiculo, total) se guarda tal cual. Los archivos del Mifare van al día de su ' +
-          'nombre, como la plantilla (el "01-10" es el 1 de octubre), y la placa se pasa a bus con las placas de Sonar. ' +
-          "Cargar otra vez un día lo reemplaza: el bus que ya no sale queda en 0.</p>" +
+        '<p class="nota">Cada renglón va al bus y al día que dice la plantilla (fecha, vehiculo, total), y se resta de los Ingresos ' +
+          "totales y del Total salidas de ese bus. Los buses que trabajaron ese día y no salen quedan con Metro 0. Si el día ya " +
+          'tenía Metro, lo nuevo lo reemplaza. Los archivos del Mifare van al día de su nombre (el "01-10" es el 1 de octubre) ' +
+          "y la placa se pasa a bus con las placas de Sonar.</p>" +
         '<div class="tabla-caja"><table><thead><tr><th>Día</th><th>Archivo</th><th class="n">Usos</th><th class="n">Buses</th><th></th></tr></thead><tbody>' +
         resumen.map(function (s) {
           return "<tr><td><strong>" + esc(fechaCorta(s.dia)) + '</strong><span class="menor">' + esc(diaSemana(s.dia)) + "</span></td><td>" +

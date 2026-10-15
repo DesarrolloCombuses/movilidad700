@@ -361,6 +361,23 @@ tr.detalle-fila > td { padding: 0; background: var(--panel-2); }
 /* ---------------------------------------------------------------- movilidad (movilidad.sql) */
 .mov-resumen { margin-bottom: 14px; }
 .mov-resumen > summary { cursor: pointer; font-weight: 750; padding: 6px 0 10px; }
+/* la ayuda de la movilidad */
+.mov-ayuda { margin: 0 0 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.mov-ayuda > summary { cursor: pointer; font-weight: 750; padding: 12px 16px; color: var(--primary); }
+.mov-ayuda[open] > summary { border-bottom: 1px solid var(--line); }
+.mov-ayuda-cuerpo { padding: 2px 16px 14px; font-size: 14px; max-width: 920px; }
+.mov-ayuda-cuerpo h3 { font-size: 15px; margin: 14px 0 6px; }
+.mov-ayuda-cuerpo p { margin: 6px 0; }
+.mov-ayuda-cuerpo ol, .mov-ayuda-cuerpo ul { margin: 6px 0; padding-left: 22px; }
+.mov-ayuda-cuerpo li { margin: 4px 0; }
+.mov-ayuda-cuerpo .ejemplo { background: var(--soft); border-radius: var(--radius-sm); padding: 8px 12px; }
+.tabla-ayuda-caja { overflow-x: auto; margin: 6px 0; }
+.tabla-ayuda { width: auto; font-size: 13.5px; border: 1px solid var(--line); }
+.tabla-ayuda th, .tabla-ayuda td { padding: 5px 10px; border: 1px solid var(--line); }
+.tabla-ayuda th { position: static; text-transform: none; letter-spacing: 0; font-size: 13.5px; }
+.tabla-ayuda tbody tr:last-child td { border-bottom: 1px solid var(--line); }
+.tabla-plantilla th { background: #b4e5a2; color: #000; }
+@media (max-width: 600px) { .tabla-ayuda th[scope="row"] { white-space: normal; } }
 .tabla-mov-dias tbody tr.elegida td { background: var(--soft); }
 .tabla-mov-dias tbody tr.elegida td:first-child { box-shadow: inset 4px 0 0 var(--primary); }
 tr.apagado td { color: var(--muted); }

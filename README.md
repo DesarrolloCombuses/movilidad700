@@ -73,7 +73,7 @@ En **Día**, el botón **Excel viaje a viaje** descarga el mismo Excel que arma 
 
 No trae la hoja **"Fuera de la ruta"** ni las aperturas sin viaje (patio, taller, aseo): Supabase solo guarda cuántas fueron. Esas siguen saliendo en el Excel del programa de Python.
 
-### La movilidad (v0.9.2, movilidad.sql versión 2)
+### La movilidad (v0.9.3, movilidad.sql versión 2)
 
 Hasta agosto, la "Base de datos" de Movilidad 2026 se armaba con la plantilla [700control](https://github.com/DesarrolloCombuses/700control) (el archivo de Sonar, el del Metro y el de ajustes). Ahora sale sola en **Movilidad**, de lo que publica el programa de la tarjeta, **con la regla de 700control**, el Descuento>20 en cero, y restando el Metro y 2 por viaje (15-oct-2026):
 
@@ -91,6 +91,7 @@ Hasta agosto, la "Base de datos" de Movilidad 2026 se armaba con la plantilla [7
 | **Observaciones** | Los motivos de los ajustes, en el orden del Excel ("Taller - Administrativo - Despachador"), "Gestor", "Corrección de control" y "No laboró" si no hizo viajes. |
 | **Pasajeros metro** | Los usos de la tarjeta Mifare (cívica) de cada bus: de la **plantilla metro** (fecha, vehiculo, total) o de los archivos *LiquidacionUsosTransporteMifare*. En los días con Metro cargado, el bus sin usos va en 0; el día sin Metro va vacío y no resta. Se resta de los ingresos y de las salidas. |
 
+- **La ayuda** (arriba, plegada: "¿Cómo funciona la movilidad y cómo se carga el Metro?") explica en la misma pantalla cómo sale cada número, con el ejemplo del 703 del 1 de octubre, cómo armar y cargar la plantilla metro, cómo cruza y qué quiere decir cada aviso.
 - **La pantalla** es la Base de datos: las mismas columnas del Excel, en el mismo orden, con la fila de totales abajo. Se filtra como en 700control: por **día**, **base**, **Dif < 0**, **Metro > 20**, texto y **vehículos**. Arriba van los totales y el **Resumen por día** (tocar un día deja solo ese día).
 - **Escribir un ajuste:** en el renglón del bus, **+ Ajuste**: cuántas personas y el motivo. No se borra: se **anula** con el porqué, y queda quién y cuándo.
 - **Cargar Metro** (solo despachadores). Antes de guardar muestra qué día, cuántos usos y cuántos buses trae cada archivo, y avisa si un bus no está en Sonar ese día o tiene Metro un día en que no hizo viajes. Recibe (15-oct-2026):
