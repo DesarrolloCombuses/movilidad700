@@ -85,6 +85,9 @@
       error: null, cargando: false, progreso: 0, orden: null },
     // Gestores (sql v8): sus celulares y lo que el programa decidió de cada código que leyó un conductor
     ges: { fecha: null, lecturas: null, celulares: null, error: null, cargando: false },
+    // Movilidad: la Base de datos de Movilidad 2026 (movilidad.sql: ajustes y archivos planos)
+    mov: { desde: null, hasta: null, datos: null, filas: null, error: null, cargando: false, abierto: null,
+      entradas: true, tablas: true, cargadoEn: null },
     v8: false,
   };
 
@@ -372,7 +375,7 @@
   function enrutar() {
     if (!state.user) return;
     var partes = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
-    var vista = ["dia", "bus", "informes", "gestores"].indexOf(partes[0]) >= 0 ? partes[0] : "dia";
+    var vista = ["dia", "bus", "informes", "movilidad", "gestores"].indexOf(partes[0]) >= 0 ? partes[0] : "dia";
     mostrarVista(vista);
     if (vista === "dia") {
       abrirDia(esFecha(partes[1]) ? partes[1] : state.dia.fecha || diaDeHoy());
@@ -380,6 +383,10 @@
       abrirBus(partes[1] || state.bus.interno, esFecha(partes[2]) ? partes[2] : state.bus.fecha || state.dia.fecha || diaDeHoy());
     } else if (vista === "gestores") {
       abrirGestores(esFecha(partes[1]) ? partes[1] : state.ges.fecha || state.dia.fecha || diaDeHoy());
+    } else if (vista === "movilidad") {
+      // Sin fechas: del primero del mes hasta ayer (los días ya cerrados).
+      var hasta = esFecha(partes[2]) ? partes[2] : state.mov.hasta || sumarDias(diaDeHoy(), -1);
+      abrirMovilidad(esFecha(partes[1]) ? partes[1] : state.mov.desde || hasta.slice(0, 8) + "01", hasta);
     } else {
       abrirInformes();
     }
@@ -391,6 +398,7 @@
     $("vistaBus").hidden = vista !== "bus";
     $("vistaInformes").hidden = vista !== "informes";
     $("vistaGestores").hidden = vista !== "gestores";
+    $("vistaMovilidad").hidden = vista !== "movilidad";
     Array.prototype.forEach.call(document.querySelectorAll("[data-pestana]"), function (a) {
       if (a.getAttribute("data-pestana") === vista) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
@@ -405,6 +413,7 @@
     if (state.dia.fecha) dia.href = "#/dia/" + state.dia.fecha;
     if (state.bus.interno) bus.href = "#/bus/" + encodeURIComponent(state.bus.interno) + "/" + state.bus.fecha;
     if (state.ges.fecha) document.querySelector('[data-pestana="gestores"]').href = "#/gestores/" + state.ges.fecha;
+    if (state.mov.desde) document.querySelector('[data-pestana="movilidad"]').href = "#/movilidad/" + state.mov.desde + "/" + state.mov.hasta;
   }
 
   // ================================================================ resumen de un grupo de viajes
@@ -1684,6 +1693,457 @@
       });
   }
 
+  // ================================================================ MOVILIDAD: la "Base de datos" de Movilidad 2026
+  // Un renglón por bus y día con las mismas 25 columnas del Excel de movilidad (hasta agosto se armaba a mano con
+  // la plantilla 700control). Sale de lo que publica el programa de la tarjeta, con la regla de la aplicación:
+  //   Sonar            = todo lo que contó la puerta entrando en el día, en los viajes y fuera de ellos
+  //   Sin ruta         = lo que entró fuera de los viajes: en la ruta sin viaje y en el patio o el taller
+  //   Descuento>20     = lo que pasó del tope de 19 en cada viaje
+  //   Ajustes          = los que escriben aquí los despachadores (despachador, taller...) + los gestores con código
+  //   Ingresos totales = Sonar - Sin ruta - Descuento>20 - Ajustes   (= los pasajeros de la tarjeta - los ajustes)
+  //   Total salidas    = lo que contó bajando en los viajes - Descuento>20 - Ajustes;   Dif = Ingresos - Salidas
+  // Lo escrito a mano va en movilidad_ajustes y los archivos planos (Metro, cívica) en movilidad_externos
+  // (almacentro/enturnes/sql/movilidad.sql). Sin ese SQL se ve igual, pero sin ajustes ni lo de fuera de los viajes.
+  var MOV_COLUMNAS = ["Vehiculo", "Ingresos totales", null, "Salidas P1", " Salidas P2", "Total salidas", "Dif", "Ruta",
+    "Fecha", "Mes", "Año", "# Día", "Base", "Ajustes", "Sin ruta", "Barrial", "Pasajeros metro", "Descuento>20", "No labora",
+    "Observaciones", "Sonar ", "Viajes realizados", "SUB-RUTA", "A-G", "Observaciones pasajero 20"];
+  var MOV_MOTIVOS = ["Despachador", "Taller", "Administrativo", "Otro"];
+  var MOV_MAX_DIAS = 62;
+  var MOV_RUTA = "700";
+  var MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre",
+    "Noviembre", "Diciembre"];
+  var DIAS_SEMANA = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+  var CAMPOS_MOV_BUS = "dia,interno,placa,programado,viajes,estado,aviso";
+
+  function textoDeError(err) { return String((err && ((err.code || "") + " " + (err.message || ""))) || ""); }
+  function faltaTabla(err) {
+    var m = textoDeError(err);
+    return /PGRST205|42P01|Could not find the table|does not exist/i.test(m) && !/column/i.test(m);
+  }
+  function faltaColumna(err) { return /42703|PGRST204|column/i.test(textoDeError(err)); }
+
+  function abrirMovilidad(desde, hasta) {
+    var m = state.mov;
+    var cambio = m.desde !== desde || m.hasta !== hasta;
+    m.desde = desde;
+    m.hasta = hasta;
+    $("movDesde").value = desde;
+    $("movHasta").value = hasta;
+    actualizarPestanas();
+    if (cambio || (!m.filas && !m.cargando)) {
+      m.filas = null;
+      m.error = null;
+      if (cambio) m.abierto = null;
+      pintarMovilidad();
+      cargarMovilidad();
+    } else {
+      pintarMovilidad();
+    }
+  }
+
+  function rangoMovilidadMalo(m) {
+    if (!esFecha(m.desde) || !esFecha(m.hasta)) return "Escoja las dos fechas.";
+    if (m.desde > m.hasta) return "La fecha de inicio va antes que la final.";
+    if (diasEntre(m.desde, m.hasta) >= MOV_MAX_DIAS) return "Máximo " + MOV_MAX_DIAS + " días a la vez.";
+    return "";
+  }
+
+  async function cargarMovilidad() {
+    var m = state.mov, desde = m.desde, hasta = m.hasta;
+    if (rangoMovilidadMalo(m)) return pintarMovilidad();
+    m.cargando = true;
+    $("movExcel").disabled = true;
+    function sigue() { return m.desde === desde && m.hasta === hasta; }
+    try {
+      var entradas = true, tablas = true;
+      function rango(q) { return q.gte("dia", desde).lte("dia", hasta); }
+      // Sin movilidad.sql: tarjeta_buses_dia no trae lo que entró fuera de los viajes, ni están los ajustes.
+      var estados = traerTodo(function () {
+        return rango(client.from("tarjeta_buses_dia").select(CAMPOS_MOV_BUS + ",entradas_sin_viaje,entradas_fuera_ruta")).order("dia").order("interno");
+      }).catch(function (err) {
+        if (!faltaColumna(err)) throw err;
+        entradas = false;
+        return traerTodo(function () { return rango(client.from("tarjeta_buses_dia").select(CAMPOS_MOV_BUS)).order("dia").order("interno"); });
+      });
+      // Por tandas de 1.000: el orden tiene que ser por la llave, o una tanda repite o salta renglones.
+      function deMovilidad(tabla, campos, orden) {
+        return traerTodo(function () {
+          return orden.reduce(function (q, c) { return q.order(c); }, rango(client.from(tabla).select(campos)));
+        }).catch(function (err) {
+          if (!faltaTabla(err)) throw err;
+          tablas = false;
+          return [];
+        });
+      }
+      var res = await Promise.all([
+        traerTodo(function () {
+          return rango(client.from("v_tarjeta_viajes").select("dia,interno,clave,sin_despacho,pasajeros,pasajeros_sensor,subidas,recortados," +
+            "estado_calculo" + (state.v8 ? ",gestores" : ""))).order("dia").order("interno").order("clave");
+        }),
+        traerTodo(function () { return rango(client.from("tarjeta_viajes").select("clave,bajadas")).order("clave"); }),
+        estados,
+        traerBases(desde, hasta).catch(function () { return null; }),
+        deMovilidad("movilidad_ajustes", "*", ["id"]),
+        deMovilidad("movilidad_externos", "dia,interno,fuente,cantidad,archivo,cargado_por_correo,cargado_en", ["dia", "interno", "fuente"]),
+        traerTodo(function () { return rango(client.from("tarjeta_dia_manual").select("dia,interno,observaciones")).order("dia").order("interno"); })
+          .catch(function () { return []; }),
+      ]);
+      if (!sigue()) return;
+      m.datos = { viajes: res[0], bajadas: res[1], estados: res[2], porBus: res[3], ajustes: res[4], externos: res[5], manual: res[6] };
+      m.entradas = entradas;
+      m.tablas = tablas;
+      m.filas = armarMovilidad(m.datos);
+      m.error = null;
+      m.cargadoEn = Date.now();
+    } catch (err) {
+      if (sigue()) m.error = err;
+    } finally {
+      m.cargando = false;
+      if (state.vista === "movilidad" && sigue()) pintarMovilidad();
+    }
+  }
+
+  // Después de escribir o anular un ajuste: solo se vuelven a pedir los ajustes.
+  async function recargarAjustesMov() {
+    var m = state.mov, desde = m.desde, hasta = m.hasta;
+    try {
+      var ajustes = await traerTodo(function () {
+        return client.from("movilidad_ajustes").select("*").gte("dia", desde).lte("dia", hasta).order("id");
+      });
+      if (m.desde !== desde || m.hasta !== hasta || !m.datos) return;
+      m.datos.ajustes = ajustes;
+      m.filas = armarMovilidad(m.datos);
+    } catch (err) {
+      aviso("Quedó guardado, pero no se pudo volver a traer: " + textoError(err), "mal");
+    }
+    if (state.vista === "movilidad") pintarMovilidad();
+  }
+
+  function armarMovilidad(d) {
+    var bajadas = {}, filas = {};
+    d.bajadas.forEach(function (x) { bajadas[x.clave] = n(x.bajadas); });
+    function fila(dia, interno) {
+      interno = String(interno == null ? "" : interno).trim();
+      var k = dia + "|" + interno;
+      return filas[k] || (filas[k] = {
+        dia: dia, interno: interno, base: baseEn(d.porBus, interno, dia), viajes: 0, sd: 0, subidas: 0, bajadas: 0,
+        recortados: 0, gestores: 0, pasajeros: 0, correccion: 0, enCurso: 0, sinViaje: null, fueraRuta: null,
+        ajustes: [], manual: 0, metro: null, civica: null, estado: null, aviso: "", obs: "",
+      });
+    }
+    d.estados.forEach(function (e) {
+      if (e.interno === "PRUEBA") return;
+      var r = fila(e.dia, e.interno);
+      r.estado = e.estado;
+      r.aviso = e.aviso || "";
+      if (e.entradas_sin_viaje != null) r.sinViaje = n(e.entradas_sin_viaje);
+      if (e.entradas_fuera_ruta != null) r.fueraRuta = n(e.entradas_fuera_ruta);
+    });
+    d.viajes.forEach(function (v) {
+      if (v.interno === "PRUEBA") return;
+      var r = fila(v.dia, v.interno);
+      r.viajes++;
+      if (v.sin_despacho) r.sd++;
+      r.subidas += n(v.subidas);
+      r.bajadas += bajadas[v.clave] || 0;
+      r.recortados += n(v.recortados);
+      r.gestores += n(v.gestores);
+      r.pasajeros += n(v.pasajeros);
+      r.correccion += n(v.pasajeros_sensor) - n(v.pasajeros);   // control corrigió el conteo de un viaje
+      if (v.estado_calculo === "en_curso") r.enCurso++;
+    });
+    d.ajustes.forEach(function (a) {
+      var r = fila(a.dia, a.interno);
+      r.ajustes.push(a);
+      if (!a.anulado_en) r.manual += n(a.cantidad);
+    });
+    d.externos.forEach(function (x) { fila(x.dia, x.interno)[x.fuente === "civica" ? "civica" : "metro"] = n(x.cantidad); });
+    d.manual.forEach(function (x) {
+      var r = filas[x.dia + "|" + String(x.interno).trim()];
+      if (r && x.observaciones) r.obs = String(x.observaciones).trim();
+    });
+    return Object.keys(filas).map(function (k) { return calcularMovilidad(filas[k]); }).sort(function (a, b) {
+      return a.dia < b.dia ? -1 : a.dia > b.dia ? 1 : compararInternos(a.interno, b.interno);
+    });
+  }
+
+  function calcularMovilidad(r) {
+    r.sinRuta = r.sinViaje == null && r.fueraRuta == null ? null : n(r.sinViaje) + n(r.fueraRuta);
+    r.sonar = r.subidas + n(r.sinRuta);
+    r.descuento = r.recortados;
+    r.ajuste = r.manual + r.gestores + r.correccion;
+    r.ingresos = r.sonar - n(r.sinRuta) - r.descuento - r.ajuste;
+    r.salidas = r.bajadas - r.descuento - r.ajuste;
+    r.dif = r.ingresos - r.salidas;
+    var partes = [];
+    MOV_MOTIVOS.forEach(function (motivo) {
+      var suyos = r.ajustes.filter(function (a) { return !a.anulado_en && a.motivo === motivo; });
+      if (!suyos.length) return;
+      if (motivo === "Otro") suyos.forEach(function (a) { partes.push(a.nota || "Otro"); });
+      else partes.push(motivo);
+    });
+    if (r.gestores) partes.push(r.gestores === 1 ? "Gestor" : "Gestores");
+    if (r.correccion) partes.push("Corrección de control");
+    if (!r.viajes) partes.push("No laboró");
+    if (r.obs) partes.push(r.obs);
+    r.observaciones = partes.join(" - ");
+    r.faltante = r.estado === "no_esta_en_sonar";
+    return r;
+  }
+
+  function resumenMovilidadPorDia(filas) {
+    var dias = {};
+    filas.forEach(function (r) {
+      var d = dias[r.dia] || (dias[r.dia] = { dia: r.dia, filas: [], buses: 0, trabajaron: 0, viajes: 0, sd: 0, sonar: 0,
+        sinRuta: null, descuento: 0, ajuste: 0, gestores: 0, ingresos: 0, salidas: 0, dif: 0, metro: null, enCurso: 0 });
+      d.filas.push(r);
+      d.buses++;
+      if (r.viajes) d.trabajaron++;
+      ["viajes", "sd", "sonar", "descuento", "ajuste", "gestores", "ingresos", "salidas", "dif", "enCurso"].forEach(function (c) { d[c] += r[c]; });
+      if (r.sinRuta != null) d.sinRuta = n(d.sinRuta) + r.sinRuta;
+      if (r.metro != null) d.metro = n(d.metro) + r.metro;
+    });
+    return Object.keys(dias).sort().map(function (k) { return dias[k]; });
+  }
+
+  function numMov(x) { return x == null ? "—" : miles(x) === "0" ? "0" : (x < 0 ? "−" : "") + miles(x); }
+
+  function pintarMovilidad() {
+    var m = state.mov, cuerpo = $("movCuerpo");
+    var malo = rangoMovilidadMalo(m);
+    $("movSub").textContent = malo ? "Un renglón por bus y día, como la Base de datos de Movilidad 2026." :
+      "Ruta " + MOV_RUTA + " · del " + fechaCorta(m.desde) + " al " + fechaCorta(m.hasta) + " · cada día va " + textoCorte() + ".";
+    if (malo) {
+      $("movExcel").disabled = true;
+      cuerpo.innerHTML = '<p class="vacio">' + esc(malo) + "</p>";
+      return;
+    }
+    if (!m.filas) {
+      $("movExcel").disabled = true;
+      cuerpo.innerHTML = m.error ? cajaError("No se pudo traer la movilidad: " + textoError(m.error), "recargar-movilidad")
+        : '<p class="cargando">Trayendo los viajes y los buses de esos días…</p>';
+      return;
+    }
+    $("movExcel").disabled = !m.filas.length;
+    var dias = resumenMovilidadPorDia(m.filas);
+    var t = resumenMovilidadPorDia(m.filas.map(function (r) { return Object.assign({}, r, { dia: "todo" }); }))[0];
+    var html = "";
+    if (!m.entradas || !m.tablas) {
+      html += '<p class="aviso-programa">' + (!m.tablas
+        ? "Falta correr <strong>movilidad.sql</strong> en Supabase: sin él no se pueden escribir los ajustes ni cargar el Metro, y Sonar sale solo con lo de los viajes."
+        : "Sonar sale solo con lo de los viajes: el programa de la oficina todavía no ha publicado lo que entró fuera de ellos (Sin ruta) para estos días.") +
+        "</p>";
+    } else if (dias.some(function (d) { return d.sinRuta == null; })) {
+      html += '<p class="aviso-programa">Algunos días no tienen lo que entró fuera de los viajes (Sin ruta): en esos, Sonar sale solo con lo de los viajes. ' +
+        "Se completan recargando esos días con el programa nuevo.</p>";
+    }
+    if (t) {
+      html += '<div class="totales">' +
+        '<div class="total"><span>Días</span><strong>' + dias.length + "</strong><small>" + miles(t.buses) + " renglones bus-día</small></div>" +
+        '<div class="total"><span>Viajes</span><strong>' + miles(t.viajes) + "</strong><small>" + miles(t.sd) + " sin despacho</small></div>" +
+        '<div class="total"><span>Sonar</span><strong>' + numMov(t.sonar) + "</strong><small>Sin ruta: " + numMov(t.sinRuta) + "</small></div>" +
+        '<div class="total"><span>Descuento &gt;19 y ajustes</span><strong>' + numMov(t.descuento + t.ajuste) + "</strong><small>" +
+          numMov(t.descuento) + " del tope · " + numMov(t.ajuste) + " ajustes" + (t.gestores ? " (" + numMov(t.gestores) + " gestores)" : "") + "</small></div>" +
+        '<div class="total" data-tono="bien"><span>Ingresos totales</span><strong>' + numMov(t.ingresos) + "</strong><small>salidas " + numMov(t.salidas) +
+          " · dif " + numMov(t.dif) + "</small></div>" +
+        '<div class="total"><span>Pasajeros metro</span><strong>' + numMov(t.metro) + "</strong><small>" +
+          (t.metro == null ? "todavía no se ha cargado el archivo" : "de los archivos cargados") + "</small></div>" +
+        "</div>";
+    }
+    var hoy = diaDeHoy();
+    html += '<div class="tabla-caja"><table class="tabla-mov"><thead><tr><th>Día</th><th class="n">Buses</th><th class="n">Viajes</th>' +
+      '<th class="n">Sonar</th><th class="n">Sin ruta</th><th class="n">Desc. &gt;19</th><th class="n">Ajustes</th>' +
+      '<th class="n">Ingresos</th><th class="n">Salidas</th><th class="n">Dif</th><th class="n">Metro</th><th></th></tr></thead><tbody>';
+    if (!dias.length) html += '<tr><td colspan="12" class="vacio">No hay nada publicado en esas fechas.</td></tr>';
+    dias.forEach(function (d) {
+      var abierto = m.abierto === d.dia;
+      html += '<tr class="fila-link' + (abierto ? " elegida" : "") + '" tabindex="0" data-mov-dia="' + esc(d.dia) + '" aria-expanded="' + abierto + '">' +
+        "<td><strong>" + esc(fechaCorta(d.dia)) + '</strong><span class="menor">' + esc(DIAS_SEMANA[new Date(d.dia + "T12:00:00Z").getUTCDay()]) + "</span></td>" +
+        '<td class="n">' + d.trabajaron + "/" + d.buses + '</td><td class="n">' + d.viajes + '</td><td class="n">' + numMov(d.sonar) +
+        '</td><td class="n">' + numMov(d.sinRuta) + '</td><td class="n">' + numMov(d.descuento) + '</td><td class="n">' + numMov(d.ajuste) +
+        '</td><td class="n"><strong>' + numMov(d.ingresos) + '</strong></td><td class="n">' + numMov(d.salidas) +
+        '</td><td class="n">' + numMov(d.dif) + '</td><td class="n">' + numMov(d.metro) + "</td><td>" +
+        (d.dia === hoy || d.enCurso ? chip("revisa", d.dia === hoy ? "Hoy: todavía cambia" : "Con viajes en camino") : "") + "</td></tr>";
+      if (abierto) html += '<tr class="mov-detalle"><td colspan="12">' + tablaMovilidadDia(d) + "</td></tr>";
+    });
+    html += "</tbody></table></div>";
+    html += '<p class="pie">' + (m.cargadoEn ? "Actualizado a las " + fmtHora.format(new Date(m.cargadoEn)) + ". " : "") +
+      "Toque un día para ver sus buses" + (state.revisor && m.tablas ? " y escribir los ajustes" : "") + ". " +
+      "Ingresos = Sonar − Sin ruta − Descuento − Ajustes: los pasajeros de la tarjeta (tope 19, sin gestores) menos los ajustes.</p>";
+    cuerpo.innerHTML = html;
+  }
+
+  function tablaMovilidadDia(d) {
+    var puede = state.revisor && state.mov.tablas;
+    return '<div class="tabla-caja"><table><thead><tr><th>Bus</th><th>Base</th><th class="n">Viajes</th><th class="n">Sonar</th>' +
+      '<th class="n">Sin ruta</th><th class="n">Desc. &gt;19</th><th class="n">Gestores</th><th>Ajustes</th><th class="n">Ingresos</th>' +
+      '<th class="n">Salidas</th><th class="n">Dif</th><th class="n">Metro</th><th>Observaciones</th></tr></thead><tbody>' +
+      d.filas.map(function (r) {
+        var vigentes = r.ajustes.filter(function (a) { return !a.anulado_en; });
+        var ajustes = vigentes.map(function (a) { return chip("", a.cantidad + " " + (a.motivo === "Otro" ? a.nota || "Otro" : a.motivo)); }).join(" ");
+        var boton = puede || r.ajustes.length
+          ? ' <button class="btn btn-chico" type="button" data-mov-ajuste="' + esc(r.interno) + '" data-mov-ajuste-dia="' + esc(r.dia) + '">' +
+            (puede ? (vigentes.length ? "Cambiar" : "+ Ajuste") : "Ver") + "</button>" : "";
+        return "<tr" + (r.viajes ? "" : ' class="apagado"') + '><td><a class="bus-num" href="#/bus/' + encodeURIComponent(r.interno) + "/" + r.dia + '">' +
+          esc(r.interno) + "</a></td><td>" + esc(r.base || "") + '</td><td class="n">' + r.viajes + (r.sd ? '<span class="menor">' + r.sd + " sin desp.</span>" : "") +
+          '</td><td class="n">' + numMov(r.sonar) + '</td><td class="n">' + numMov(r.sinRuta) + '</td><td class="n">' + numMov(r.descuento) +
+          '</td><td class="n">' + (r.gestores || "") + '</td><td class="mov-ajustes">' + (ajustes || (boton ? "" : "—")) + boton +
+          '</td><td class="n"><strong>' + numMov(r.ingresos) + '</strong></td><td class="n">' + numMov(r.salidas) + '</td><td class="n">' +
+          numMov(r.dif) + '</td><td class="n">' + numMov(r.metro) + "</td><td>" + esc(r.observaciones) +
+          (r.faltante ? '<span class="menor">Vehículo faltante (no está en Sonar)</span>' : "") + "</td></tr>";
+      }).join("") + "</tbody></table></div>";
+  }
+
+  function abrirAjusteMov(interno, dia) {
+    var m = state.mov;
+    var r = (m.filas || []).filter(function (f) { return f.dia === dia && f.interno === interno; })[0];
+    if (!r) return;
+    var puede = state.revisor && m.tablas;
+    var lista = r.ajustes.length ? '<ul class="lista-ajustes">' + r.ajustes.map(function (a) {
+      return "<li" + (a.anulado_en ? ' class="anulado"' : "") + "><strong>" + a.cantidad + " · " + esc(a.motivo) + "</strong>" +
+        (a.nota ? " · " + esc(a.nota) : "") + '<span class="menor">' + esc(a.escrita_por_correo || "") + " · " + esc(momento(a.escrita_en)) + "</span>" +
+        (a.anulado_en ? '<span class="menor">Anulado por ' + esc(a.anulado_por_correo || "") + " el " + esc(momento(a.anulado_en)) + ": " + esc(a.anulado_motivo || "") + "</span>"
+          : puede ? '<button class="btn btn-chico" type="button" data-mov-anular="' + esc(a.id) + '">Anular</button>' : "") + "</li>";
+    }).join("") + "</ul>" : '<p class="nota">Este bus no tiene ajustes este día.</p>';
+    abrirHoja("Ajustes del " + interno + " · " + fechaCorta(dia),
+      '<p class="nota">Personas que el sensor contó y no son pasajeros. Se restan de los ingresos y de las salidas. ' +
+        "Ahora: Sonar " + numMov(r.sonar) + " · Ingresos " + numMov(r.ingresos) + (r.gestores ? " · " + r.gestores + " gestor(es) ya restados" : "") + ".</p>" +
+      lista +
+      (puede ? '<form id="formAjusteMov" class="form-ajuste" novalidate>' +
+        '<label class="campo"><span>Cuántas personas</span><input id="ajusteCantidad" type="number" min="1" max="99" step="1" inputmode="numeric" required></label>' +
+        '<label class="campo"><span>Motivo</span><select id="ajusteMotivo">' +
+          MOV_MOTIVOS.map(function (x) { return "<option>" + x + "</option>"; }).join("") + "</select></label>" +
+        '<label class="campo"><span>Nota (obligatoria si es Otro)</span><input id="ajusteNota" maxlength="300" autocomplete="off"></label>' +
+        '<p id="ajusteError" class="error" hidden></p>' +
+        '<div class="acciones"><button class="btn btn-primario" type="submit" id="ajusteGuardar">Guardar el ajuste</button>' +
+        '<button class="btn" type="button" data-cerrar-hoja>Cerrar</button></div></form>'
+        : '<p class="nota">' + (m.tablas ? "Solo los despachadores (tarjeta_revisores) escriben ajustes." : "Falta correr movilidad.sql en Supabase.") + "</p>"),
+      function (caja) {
+        var form = caja.querySelector("#formAjusteMov");
+        if (!form) return;
+        form.addEventListener("submit", async function (ev) {
+          ev.preventDefault();
+          var cantidad = Number($("ajusteCantidad").value);
+          var motivo = $("ajusteMotivo").value;
+          var nota = $("ajusteNota").value.trim();
+          var error = $("ajusteError");
+          error.hidden = true;
+          if (!(cantidad >= 1 && cantidad <= 99 && Math.floor(cantidad) === cantidad)) {
+            error.textContent = "Escriba cuántas personas, de 1 a 99.";
+            error.hidden = false;
+            return;
+          }
+          if (motivo === "Otro" && !nota) {
+            error.textContent = "Escriba en la nota quién era.";
+            error.hidden = false;
+            return;
+          }
+          $("ajusteGuardar").disabled = true;
+          try {
+            var res = await conTiempo(client.from("movilidad_ajustes").insert({ dia: dia, interno: interno, cantidad: cantidad, motivo: motivo, nota: nota || null }));
+            if (res.error) throw res.error;
+            cerrarHoja();
+            aviso("Ajuste guardado: " + cantidad + " " + motivo + " en el " + interno + ".");
+            recargarAjustesMov();
+          } catch (err) {
+            error.textContent = textoError(err);
+            error.hidden = false;
+            $("ajusteGuardar").disabled = false;
+          }
+        });
+      });
+  }
+
+  function abrirAnularAjuste(id) {
+    var a = ((state.mov.datos || {}).ajustes || []).filter(function (x) { return String(x.id) === String(id); })[0];
+    if (!a) return;
+    abrirHoja("Anular el ajuste",
+      "<p><strong>" + a.cantidad + " · " + esc(a.motivo) + "</strong> en el " + esc(a.interno) + " el " + esc(fechaCorta(a.dia)) + "</p>" +
+      '<p class="nota">El ajuste no se borra: queda anulado, con quién, cuándo y por qué, y deja de restarse.</p>' +
+      '<form id="formAnularAjuste" novalidate><label class="campo"><span>Por qué</span><textarea id="anularMotivo" maxlength="300"></textarea></label>' +
+      '<p id="anularError" class="error" hidden></p>' +
+      '<div class="acciones"><button class="btn btn-peligro" type="submit" id="anularGuardar">Anular</button>' +
+      '<button class="btn" type="button" data-cerrar-hoja>Cancelar</button></div></form>',
+      function (caja) {
+        caja.querySelector("#formAnularAjuste").addEventListener("submit", async function (ev) {
+          ev.preventDefault();
+          var motivo = $("anularMotivo").value.trim();
+          if (!motivo) {
+            $("anularError").textContent = "Escriba por qué.";
+            $("anularError").hidden = false;
+            return;
+          }
+          $("anularGuardar").disabled = true;
+          try {
+            var res = await conTiempo(client.rpc("movilidad_anular_ajuste", { p_id: a.id, p_motivo: motivo }));
+            if (res.error) throw res.error;
+            cerrarHoja();
+            aviso("Ajuste anulado.");
+            recargarAjustesMov();
+          } catch (err) {
+            $("anularError").textContent = textoError(err);
+            $("anularError").hidden = false;
+            $("anularGuardar").disabled = false;
+          }
+        });
+      });
+  }
+
+  // El día como número de Excel (días desde el 30-dic-1899), para que la columna Fecha sea fecha de verdad.
+  function serialExcel(dia) {
+    var p = dia.split("-").map(Number);
+    return (Date.UTC(p[0], p[1] - 1, p[2]) - Date.UTC(1899, 11, 30)) / (24 * HORA_MS);
+  }
+
+  function baseNumero(base) {
+    var x = /(\d+)/.exec(base || "");
+    return x ? Number(x[1]) : base ? "SIN BASE" : "";
+  }
+
+  // El renglón como va en la Base de datos de Movilidad 2026 (las mismas 25 columnas, en el mismo orden).
+  function filaMovilidad(r) {
+    var f = new Date(r.dia + "T12:00:00Z");
+    return [r.interno, r.ingresos, null, r.salidas, 0, r.salidas, r.dif, MOV_RUTA, serialExcel(r.dia), MESES[f.getUTCMonth()],
+      f.getUTCFullYear(), DIAS_SEMANA[f.getUTCDay()], baseNumero(r.base), r.ajuste, r.sinRuta, null, r.metro, r.descuento, null,
+      r.observaciones || null, r.sonar, r.viajes, null, null, r.faltante ? "Vehículo faltante" : null];
+  }
+
+  function excelMovilidad() {
+    if (!window.XLSX) return aviso("No cargó la herramienta del Excel. Revise el internet y recargue.", "mal");
+    var m = state.mov;
+    if (!m.filas || !m.filas.length) return;
+    var datos = [MOV_COLUMNAS].concat(m.filas.map(filaMovilidad));
+    var hoja = XLSX.utils.aoa_to_sheet(datos);
+    for (var i = 1; i < datos.length; i++) {
+      var celda = hoja[XLSX.utils.encode_cell({ r: i, c: 8 })];
+      if (celda) celda.z = "m/d/yy";
+    }
+    hoja["!cols"] = MOV_COLUMNAS.map(function (t) { return { wch: t === "Observaciones" ? 34 : Math.max(9, String(t || "").length + 2) }; });
+    var libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, "Base de datos");
+    XLSX.utils.book_append_sheet(libro, hojaDe(resumenMovilidadPorDia(m.filas).map(function (d) {
+      return { "Fecha": d.dia, "Buses": d.buses, "Trabajaron": d.trabajaron, "Viajes": d.viajes, "Sin despacho": d.sd, "Sonar": d.sonar,
+        "Sin ruta": d.sinRuta == null ? "" : d.sinRuta, "Descuento>20 (tope 19)": d.descuento, "Ajustes": d.ajuste, "De ellos gestores": d.gestores,
+        "Ingresos totales": d.ingresos, "Total salidas": d.salidas, "Dif": d.dif, "Pasajeros metro": d.metro == null ? "" : d.metro };
+    })), "Resumen por día");
+    var ajustes = (m.datos.ajustes || []).map(function (a) {
+      return { "Día": a.dia, "Bus": a.interno, "Cantidad": a.cantidad, "Motivo": a.motivo, "Nota": a.nota || "",
+        "Escribió": a.escrita_por_correo || "", "Cuándo": momento(a.escrita_en),
+        "Anulado": a.anulado_en ? (a.anulado_motivo || "") + " (" + (a.anulado_por_correo || "") + ", " + momento(a.anulado_en) + ")" : "" };
+    });
+    XLSX.utils.book_append_sheet(libro, hojaDe(ajustes.length ? ajustes : [{ "Ajustes": "Ninguno entre esas fechas" }], { "Nota": 30, "Anulado": 40 }), "Ajustes");
+    XLSX.utils.book_append_sheet(libro, hojaDe([
+      "Movilidad de la ruta " + MOV_RUTA + " sacada del Portal de Control: un renglón por bus y día, como la hoja Base de datos de Movilidad 2026.",
+      "Sonar: todo lo que contó la puerta entrando en el día, en los viajes y fuera de ellos.",
+      "Sin ruta: lo que entró fuera de los viajes (en la ruta sin viaje, y en el patio o el taller). No son pasajeros.",
+      "Descuento>20: lo que pasó del tope de 19 pasajeros en cada viaje (la regla de la tarjeta).",
+      "Ajustes: los que escribieron los despachadores en Control (despachador, taller, administrativo...) más los gestores que subieron con su código.",
+      "Ingresos totales = Sonar - Sin ruta - Descuento>20 - Ajustes. Total salidas = lo que bajó en los viajes - Descuento>20 - Ajustes. Dif = Ingresos - Salidas.",
+      "Salidas P2 va en 0: el sensor no separa las puertas. Viajes realizados cuenta también los viajes sin despacho.",
+    ].map(function (t) { return { "Cómo se lee": t }; }), { "Cómo se lee": 140 }), "Notas");
+    XLSX.writeFile(libro, "movilidad_" + MOV_RUTA + "_" + m.desde + "_a_" + m.hasta + ".xlsx");
+  }
+
   // ---------------------------------------------------------------- Excel e imprimir
   function filaExcel(f) {
     return {
@@ -2433,6 +2893,17 @@
     $("gesHoy").addEventListener("click", function () { location.hash = "#/gestores/" + diaDeHoy(); });
     $("gesActualizar").addEventListener("click", function () { cargarGestores(); });
 
+    // Movilidad
+    $("movForm").addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var desde = $("movDesde").value, hasta = $("movHasta").value;
+      if (!esFecha(desde) || !esFecha(hasta)) return aviso("Escoja las dos fechas.", "mal");
+      var nuevo = "#/movilidad/" + desde + "/" + hasta;
+      if (location.hash === nuevo) { state.mov.filas = null; pintarMovilidad(); cargarMovilidad(); }
+      else location.hash = nuevo;
+    });
+    $("movExcel").addEventListener("click", excelMovilidad);
+
     // Clics dentro de las tablas y la tarjeta
     document.addEventListener("click", function (ev) {
       var t = ev.target;
@@ -2443,9 +2914,12 @@
         else if (accion === "recargar-bus") { state.bus.error = null; pintarBus(); cargarBus(); }
         else if (accion === "recargar-informe") consultarInforme();
         else if (accion === "recargar-gestores") cargarGestores();
+        else if (accion === "recargar-movilidad") cargarMovilidad();
         return;
       }
       if (t.closest("[data-cerrar-hoja]") || t === $("hoja")) return cerrarHoja();
+      if ((el = t.closest("[data-mov-ajuste]"))) return abrirAjusteMov(el.getAttribute("data-mov-ajuste"), el.getAttribute("data-mov-ajuste-dia"));
+      if ((el = t.closest("[data-mov-anular]"))) return abrirAnularAjuste(el.getAttribute("data-mov-anular"));
       if ((el = t.closest("th[data-orden]"))) {
         var orden = state.vista === "informes" ? state.inf.orden : state.dia.orden;
         cambiarOrden(orden, el.getAttribute("data-orden"));
@@ -2459,6 +2933,11 @@
       if ((el = t.closest("[data-celular-rechazar]"))) return abrirRevisarCelular(el.getAttribute("data-celular-rechazar"), "rechazar");
       if ((el = t.closest("[data-celular-quitar]"))) return abrirRevisarCelular(el.getAttribute("data-celular-quitar"), "quitar");
       if (t.closest("a, input, textarea, select, form")) return;
+      if ((el = t.closest("tr[data-mov-dia]"))) {
+        var dia = el.getAttribute("data-mov-dia");
+        state.mov.abierto = state.mov.abierto === dia ? null : dia;
+        return pintarMovilidad();
+      }
       if ((el = t.closest("tr[data-viaje]"))) {
         var clave = el.getAttribute("data-viaje");
         state.bus.abiertos[clave] = !state.bus.abiertos[clave];

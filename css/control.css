@@ -357,3 +357,18 @@ tr.detalle-fila > td { padding: 0; background: var(--panel-2); }
 .selfie { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; background: var(--line); border: 2px solid #fff; box-shadow: var(--shadow); }
 .selfie-grande { display: block; width: 160px; height: 160px; margin: 0 auto 10px; }
 @media (max-width: 420px) { .celulares { grid-template-columns: 1fr; } }
+
+/* ---------------------------------------------------------------- movilidad (movilidad.sql) */
+.tabla-mov tbody tr.elegida td { background: var(--soft); }
+.tabla-mov tbody tr.elegida td:first-child { box-shadow: inset 4px 0 0 var(--primary); }
+.tabla-mov tr.mov-detalle > td { padding: 6px 0 14px 14px; background: var(--panel); }
+.tabla-mov tr.mov-detalle .tabla-caja { margin: 0; }
+tr.apagado td { color: var(--muted); }
+.lista-ajustes { margin: 6px 0 12px; padding-left: 0; list-style: none; }
+.lista-ajustes li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 0; border-top: 1px solid var(--line); }
+.lista-ajustes li:first-child { border-top: 0; }
+.lista-ajustes li .menor { flex-basis: 100%; }
+.lista-ajustes li.anulado strong { text-decoration: line-through; color: var(--muted); }
+.form-ajuste { display: grid; gap: 10px; }
+td.mov-ajustes { white-space: nowrap; }
+td.mov-ajustes .btn-chico { min-height: 26px; padding: 0 8px; }

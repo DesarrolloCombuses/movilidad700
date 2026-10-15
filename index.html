@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./css/control.css?v=0.7.0">
+  <link rel="stylesheet" href="./css/control.css?v=0.8.0">
 </head>
 <body>
 
@@ -52,6 +52,7 @@
       <a href="#/dia" data-pestana="dia">Día</a>
       <a href="#/bus" data-pestana="bus">Tarjeta del bus</a>
       <a href="#/informes" data-pestana="informes">Informes</a>
+      <a href="#/movilidad" data-pestana="movilidad">Movilidad</a>
       <a href="#/gestores" data-pestana="gestores">Gestores</a>
     </nav>
     <div class="quien">
@@ -150,6 +151,24 @@
       <div id="infCuerpo"></div>
     </section>
 
+    <!-- ---- Movilidad: la Base de datos de Movilidad 2026, un renglón por bus y día ---- -->
+    <section id="vistaMovilidad" class="vista" hidden>
+      <div class="cabeza">
+        <div>
+          <h1>Movilidad</h1>
+          <p id="movSub" class="sub">Un renglón por bus y día, como la Base de datos de Movilidad 2026.</p>
+        </div>
+      </div>
+      <form id="movForm" class="inf-form" novalidate>
+        <label class="campo"><span>Desde</span><input id="movDesde" type="date" required></label>
+        <label class="campo"><span>Hasta</span><input id="movHasta" type="date" required></label>
+        <button class="btn btn-primario" type="submit">Ver</button>
+        <button id="movExcel" class="btn btn-sutil" type="button" disabled
+          title="Las 25 columnas de la Base de datos de Movilidad 2026, para pegar debajo">Descargar Excel</button>
+      </form>
+      <div id="movCuerpo"></div>
+    </section>
+
     <!-- ---- Gestores: sus celulares (aprobar) y lo que leyeron los conductores ---- -->
     <section id="vistaGestores" class="vista" hidden>
       <div class="cabeza">
@@ -192,7 +211,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="./js/control-config.js?v=0.7.0"></script>
-<script src="./js/control.js?v=0.7.0"></script>
+<script src="./js/control-config.js?v=0.8.0"></script>
+<script src="./js/control.js?v=0.8.0"></script>
 </body>
 </html>
