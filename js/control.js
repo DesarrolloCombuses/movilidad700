@@ -87,7 +87,7 @@
     ges: { fecha: null, lecturas: null, celulares: null, error: null, cargando: false },
     // Movilidad: la Base de datos de Movilidad 2026 (movilidad.sql: ajustes y archivos planos)
     mov: { desde: null, hasta: null, datos: null, filas: null, error: null, cargando: false, resumenAbierto: false,
-      noRealizados: null, noRealizadosError: null, noRealizadosPromesa: null, noRealizadosAbierto: false,
+      noRealizados: null, noRealizadosError: null, noRealizadosPromesa: null, noRealizadosAbierto: true,
       entradas: true, salidas: true, tablas: true, cargadoEn: null, armandoExcel: false,
       filtro: { dia: "", base: "", difNeg: false, metro20: false, texto: "", vehiculos: [] } },
     v8: false,
@@ -2025,6 +2025,21 @@
     return { lista: lista.sort(orden), sinGps: sinGps.sort(orden) };
   }
 
+  // Cuántos no se hicieron y en qué sentido: { subida, bajada, otro } -> "2" con "1↑ 1↓" debajo.
+  function cuentaSentidos(x) {
+    var t = x.subida + x.bajada + x.otro;
+    if (!t) return "";
+    var s = [];
+    if (x.subida) s.push(x.subida + "↑");
+    if (x.bajada) s.push(x.bajada + "↓");
+    if (x.otro) s.push(x.otro + "?");
+    return "<strong>" + t + '</strong><span class="sentidos">' + s.join(" ") + "</span>";
+  }
+  function sentidosVacios() { return { subida: 0, bajada: 0, otro: 0 }; }
+  function ladoDe(d) { return d.sentido === "subida" || d.sentido === "bajada" ? d.sentido : "otro"; }
+
+  // Los despachos no realizados: la tabla de buses por días (todo el rango) y, debajo, la lista separada por día,
+  // con los filtros de día y de vehículos (tocar un número, un bus o un día los pone).
   function pintarNoRealizados() {
     var m = state.mov, caja = $("movNoRealizados");
     if (!m.filas || !m.filas.length || rangoMovilidadMalo(m)) { caja.innerHTML = ""; return; }
@@ -2035,43 +2050,111 @@
     var nr = m.noRealizados;
     if (!nr) { caja.innerHTML = '<p class="pie">Revisando con el GPS qué despachos no se realizaron…</p>'; return; }
     var f = m.filtro;
+    var porDia = {}, porBus = {}, total = sentidosVacios();
+    function dia(k) { return porDia[k] || (porDia[k] = { s: sentidosVacios(), sinGps: 0 }); }
+    function bus(k) { return porBus[k] || (porBus[k] = { s: sentidosVacios(), dias: {} }); }
+    nr.lista.forEach(function (d) {
+      var lado = ladoDe(d), b = bus(d.interno);
+      total[lado]++;
+      dia(d.dia).s[lado]++;
+      b.s[lado]++;
+      (b.dias[d.dia] = b.dias[d.dia] || sentidosVacios())[lado]++;
+    });
+    nr.sinGps.forEach(function (d) { dia(d.dia).sinGps++; });
+    var dias = Object.keys(porDia).sort(), buses = Object.keys(porBus).sort(compararInternos);
+    var unBus = f.vehiculos.length === 1 ? f.vehiculos[0] : "";
+    var html = '<details class="mov-resumen" id="movNoRealizadosDet"' + (m.noRealizadosAbierto ? " open" : "") + "><summary>" +
+      "Despachos no realizados: " + miles(nr.lista.length) + " (" + miles(total.subida) + " suben al aeropuerto, " + miles(total.bajada) +
+      " bajan)</summary>" +
+      '<p class="nota">Sonar los canceló y el GPS muestra que el bus anduvo menos de la mitad de lo normal de esa ruta: el despacho no ' +
+        "se hizo. Siguen contando en Viajes realizados de la movilidad. <strong>↑</strong> sube al aeropuerto, <strong>↓</strong> baja del aeropuerto. " +
+        "Toque un número para ver esos despachos abajo; un bus, para ver los suyos; un día, para ver los de ese día.</p>";
+    if (!dias.length) {
+      caja.innerHTML = html + '<p class="vacio">Ningún despacho sin realizar en esas fechas.</p></details>';
+      return;
+    }
+    // La tabla de buses por días
+    html += '<div class="tabla-caja"><table class="nr-matriz"><thead><tr><th class="fijo">Bus</th>' +
+      dias.map(function (k) {
+        return '<th class="n' + (f.dia === k ? " elegida" : "") + '" data-nr-dia="' + esc(k) + '" tabindex="0">' + esc(k.slice(8) + "/" + k.slice(5, 7)) +
+          '<span class="sentidos">' + esc(diaSemana(k).slice(0, 3)) + "</span></th>";
+      }).join("") + '<th class="n">Total</th></tr></thead><tbody>' +
+      buses.map(function (b) {
+        var x = porBus[b];
+        return '<tr' + (unBus === b ? ' class="elegida"' : "") + '><th class="fijo" data-nr-bus="' + esc(b) + '" tabindex="0">' + esc(b) + "</th>" +
+          dias.map(function (k) {
+            var c = x.dias[k];
+            return '<td class="n' + (c ? " nr-celda" : "") + (f.dia === k ? " elegida" : "") + (c && f.dia === k && unBus === b ? " marcada" : "") + '"' +
+              (c ? ' data-nr-dia="' + esc(k) + '" data-nr-bus="' + esc(b) + '" tabindex="0"' : "") + ">" + (c ? cuentaSentidos(c) : "") + "</td>";
+          }).join("") + '<td class="n">' + cuentaSentidos(x.s) + "</td></tr>";
+      }).join("") + "</tbody><tfoot>" +
+      '<tr><th class="fijo">Total</th>' + dias.map(function (k) { return '<td class="n">' + (cuentaSentidos(porDia[k].s) || "0") + "</td>"; }).join("") +
+        '<td class="n">' + cuentaSentidos(total) + "</td></tr>" +
+      (nr.sinGps.length ? '<tr class="apagado"><th class="fijo">Sin GPS</th>' + dias.map(function (k) {
+        return '<td class="n">' + (porDia[k].sinGps || "") + "</td>";
+      }).join("") + '<td class="n">' + nr.sinGps.length + "</td></tr>" : "") +
+      "</tfoot></table></div>";
+    if (nr.sinGps.length) {
+      html += '<p class="pie">Sin GPS: cancelados en Sonar que no tienen recorrido, de esos no se sabe si se hicieron (en la lista van en gris).</p>';
+    }
+    // La lista, separada por día, con los filtros de día y vehículos
     function pasa(d) { return (!f.dia || d.dia === f.dia) && (!f.vehiculos.length || f.vehiculos.indexOf(d.interno) >= 0); }
     var lista = nr.lista.filter(pasa), sinGps = nr.sinGps.filter(pasa);
-    var dias = {};
-    function dia(d) { return dias[d] || (dias[d] = { subida: 0, bajada: 0, otro: 0, sinGps: 0 }); }
-    lista.forEach(function (d) { dia(d.dia)[d.sentido === "subida" || d.sentido === "bajada" ? d.sentido : "otro"]++; });
-    sinGps.forEach(function (d) { dia(d.dia).sinGps++; });
-    var sube = lista.filter(function (d) { return d.sentido === "subida"; }).length;
-    var baja = lista.filter(function (d) { return d.sentido === "bajada"; }).length;
-    var html = '<details class="mov-resumen" id="movNoRealizadosDet"' + (m.noRealizadosAbierto ? " open" : "") + "><summary>" +
-      "Despachos no realizados: " + miles(lista.length) + " (" + miles(sube) + " suben al aeropuerto, " + miles(baja) + " bajan)" +
-      (f.dia ? " · " + esc(fechaCorta(f.dia)) : "") + "</summary>" +
-      '<p class="nota">Sonar los canceló y el GPS muestra que el bus anduvo menos de la mitad de lo normal de esa ruta: el despacho no ' +
-        "se hizo. Siguen contando en Viajes realizados de la movilidad." +
-        (sinGps.length ? " Al final van " + sinGps.length + " cancelados más que no tienen recorrido GPS: de esos no se sabe." : "") + "</p>";
-    var orden = Object.keys(dias).sort();
-    if (!orden.length) {
-      html += '<p class="vacio">Ningún despacho sin realizar' + (f.dia ? " ese día" : " en esas fechas") + ".</p></details>";
+    var filtrado = f.dia || f.vehiculos.length;
+    html += '<div class="nr-lista-cabeza"><h3>Los despachos' + (filtrado ? ": " + esc([f.dia ? fechaCorta(f.dia) : "", f.vehiculos.length
+      ? (f.vehiculos.length === 1 ? "bus " + f.vehiculos[0] : f.vehiculos.length + " buses") : ""].filter(Boolean).join(" · ")) : " de todos los días") + "</h3>" +
+      (filtrado ? '<button class="btn btn-sutil btn-chico" type="button" data-nr-todos>Ver todos</button>' : "") + "</div>";
+    var grupos = {};
+    lista.concat(sinGps).forEach(function (d) { (grupos[d.dia] = grupos[d.dia] || []).push(d); });
+    var diasLista = Object.keys(grupos).sort();
+    if (!diasLista.length) {
+      html += '<p class="vacio">Ninguno con esos filtros.</p></details>';
       caja.innerHTML = html;
       return;
     }
-    html += '<div class="tabla-caja"><table class="tabla-mov-dias"><thead><tr><th>Día</th><th class="n">No realizados</th>' +
-      '<th class="n">Suben al aeropuerto</th><th class="n">Bajan del aeropuerto</th><th class="n">Cancelados sin GPS</th></tr></thead><tbody>' +
-      orden.map(function (k) {
-        var x = dias[k];
-        return "<tr><td><strong>" + esc(fechaCorta(k)) + '</strong><span class="menor">' + esc(diaSemana(k)) + '</span></td><td class="n"><strong>' +
-          (x.subida + x.bajada + x.otro) + '</strong></td><td class="n">' + x.subida + '</td><td class="n">' + x.bajada + '</td><td class="n">' + x.sinGps + "</td></tr>";
-      }).join("") + "</tbody></table></div>" +
-      '<div class="tabla-caja tabla-no-realizados"><table><thead><tr><th>Día</th><th>Bus</th><th class="n">Viaje</th><th>Despacho</th>' +
+    html += '<div class="tabla-caja tabla-no-realizados"><table><thead><tr><th>Bus</th><th class="n">Viaje</th><th>Despacho</th>' +
       '<th>Itinerario</th><th>Sentido</th><th class="n">Anduvo</th><th class="n">Duró</th><th class="n">Subieron</th><th class="n">Bajaron</th></tr></thead><tbody>' +
-      lista.concat(sinGps).map(function (d) {
-        return "<tr" + (d.km == null ? ' class="apagado"' : "") + "><td>" + esc(fechaMov(d.dia)) + '</td><td><a class="bus-num" href="#/bus/' +
-          encodeURIComponent(d.interno) + "/" + d.dia + '">' + esc(d.interno) + '</a></td><td class="n">' + (d.viaje == null ? "—" : d.viaje) +
-          "</td><td>" + esc(hora(d.despacho_en)) + "</td><td>" + esc(rutaLegible(d.itinerario) || "—") + "</td><td>" + esc(SENTIDO_TEXTO[d.sentido]) +
-          '</td><td class="n">' + (d.km == null ? "Sin GPS" : kmTexto(d.km) + " de " + d.kmNormal + " km") + '</td><td class="n">' +
-          (d.minutos == null ? "—" : d.minutos + " min") + '</td><td class="n">' + d.subidas + '</td><td class="n">' + d.bajadas + "</td></tr>";
+      diasLista.map(function (k) {
+        var del = grupos[k].sort(function (a, b) { return (a.km == null) - (b.km == null) || Date.parse(a.despacho_en) - Date.parse(b.despacho_en); });
+        var s = sentidosVacios(), sin = 0;
+        del.forEach(function (d) { if (d.km == null) sin++; else s[ladoDe(d)]++; });
+        return '<tr class="grupo"><td colspan="9">' + esc(diaSemana(k) + " " + fechaMov(k)) + " · " + (s.subida + s.bajada + s.otro) + " no realizados: " +
+          s.subida + " suben al aeropuerto, " + s.bajada + " bajan" + (s.otro ? ", " + s.otro + " sin sentido" : "") + (sin ? " · " + sin + " sin GPS" : "") + "</td></tr>" +
+          del.map(function (d) {
+            return "<tr" + (d.km == null ? ' class="apagado"' : "") + '><td><a class="bus-num" href="#/bus/' + encodeURIComponent(d.interno) + "/" + d.dia + '">' +
+              esc(d.interno) + '</a></td><td class="n">' + (d.viaje == null ? "—" : d.viaje) + "</td><td>" + esc(hora(d.despacho_en)) + "</td><td>" +
+              esc(rutaLegible(d.itinerario) || "—") + "</td><td>" + esc(SENTIDO_TEXTO[d.sentido]) + '</td><td class="n">' +
+              (d.km == null ? "Sin GPS" : kmTexto(d.km) + " de " + d.kmNormal + " km") + '</td><td class="n">' + (d.minutos == null ? "—" : d.minutos + " min") +
+              '</td><td class="n">' + d.subidas + '</td><td class="n">' + d.bajadas + "</td></tr>";
+          }).join("");
       }).join("") + "</tbody></table></div></details>";
     caja.innerHTML = html;
+  }
+
+  // Tocar en los despachos no realizados: un número (día y bus), un bus o un día. Otra vez lo mismo, lo quita.
+  function clicNoRealizados(ev) {
+    var el = ev.target.closest("[data-nr-dia],[data-nr-bus],[data-nr-todos]");
+    if (!el) return;
+    var f = state.mov.filtro;
+    if (el.hasAttribute("data-nr-todos")) {
+      f.dia = "";
+      f.vehiculos = [];
+    } else {
+      var dia = el.getAttribute("data-nr-dia"), bus = el.getAttribute("data-nr-bus");
+      var mismo = (!dia || f.dia === dia) && (!bus || (f.vehiculos.length === 1 && f.vehiculos[0] === bus));
+      if (mismo) {
+        if (dia) f.dia = "";
+        if (bus) f.vehiculos = [];
+      } else {
+        if (dia) f.dia = dia;
+        if (bus) f.vehiculos = [bus];
+        if (dia && !bus) f.vehiculos = f.vehiculos.length === 1 && state.mov.noRealizados.lista.some(function (d) {
+          return d.dia === dia && d.interno === f.vehiculos[0];
+        }) ? f.vehiculos : [];
+        if (bus && !dia && f.dia && !state.mov.noRealizados.lista.some(function (d) { return d.dia === f.dia && d.interno === bus; })) f.dia = "";
+      }
+    }
+    pintarMovilidad();
   }
 
   function filtroMovVacio() { return { dia: "", base: "", difNeg: false, metro20: false, texto: "", vehiculos: [] }; }
@@ -2790,6 +2873,26 @@
           d.km == null ? "Cancelado sin GPS: no se sabe" : "No realizado"]);
       });
       NR.cerrar();
+      // y la tabla de buses por días (cuántos no se hicieron cada día; ↑ sube al aeropuerto, ↓ baja)
+      if (nr && nr.lista.length) {
+        var diasNR = {}, busesNR = {};
+        nr.lista.forEach(function (d) {
+          diasNR[d.dia] = true;
+          var b = busesNR[d.interno] = busesNR[d.interno] || {};
+          b[d.dia] = (b[d.dia] || 0) + 1;
+        });
+        var ld = Object.keys(diasNR).sort(), lb = Object.keys(busesNR).sort(compararInternos);
+        var MX = hojaVaV(libro, "No realizados por bus y día", ["Bus"].concat(ld.map(fechaMov), ["Total", "Suben al aeropuerto", "Bajan del aeropuerto"]));
+        lb.forEach(function (b) {
+          var suyos = nr.lista.filter(function (d) { return d.interno === b; });
+          MX.poner([b].concat(ld.map(function (k) { return busesNR[b][k] || null; }), [suyos.length,
+            suyos.filter(function (d) { return d.sentido === "subida"; }).length, suyos.filter(function (d) { return d.sentido === "bajada"; }).length]));
+        });
+        MX.poner(["Total"].concat(ld.map(function (k) { return nr.lista.filter(function (d) { return d.dia === k; }).length; }), [nr.lista.length,
+          nr.lista.filter(function (d) { return d.sentido === "subida"; }).length, nr.lista.filter(function (d) { return d.sentido === "bajada"; }).length]),
+          COLOR_VAV.azul, true);
+        MX.cerrar();
+      }
       var A = hojaVaV(libro, "Ajustes", ["Día", "Bus", "Cantidad", "Motivo", "Nota", "Escribió", "Cuándo", "Anulado"]);
       var ajustes = m.datos.ajustes || [];
       if (!ajustes.length) A.poner(["Ninguno entre esas fechas"]);
@@ -3609,6 +3712,10 @@
     $("movNoRealizados").addEventListener("toggle", function (ev) {
       if (ev.target.id === "movNoRealizadosDet") state.mov.noRealizadosAbierto = ev.target.open;
     }, true);
+    $("movNoRealizados").addEventListener("click", clicNoRealizados);
+    $("movNoRealizados").addEventListener("keydown", function (ev) {
+      if ((ev.key === "Enter" || ev.key === " ") && ev.target.closest("[data-nr-dia],[data-nr-bus]")) { ev.preventDefault(); clicNoRealizados(ev); }
+    });
 
     // Clics dentro de las tablas y la tarjeta
     document.addEventListener("click", function (ev) {
