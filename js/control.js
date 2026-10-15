@@ -1704,11 +1704,13 @@
   //   Descuento>20      = 0: sin tope
   //   Ajustes           = los que escriben aquí los despachadores (taller, despachador...) + los gestores con código
   //                       + lo que control corrigió en un viaje
-  //   Ingresos totales  = Sonar - Descuento>20 - Viajes realizados - Ajustes
+  //   Ingresos totales  = Sonar - Descuento>20 - Pasajeros metro - 2 x Viajes realizados - Ajustes
   //   Viajes realizados = los viajes con despacho (los sin despacho suman en Sonar, pero no restan)
   //   Pasajeros metro   = los usos del Mifare de ese bus (Cargar Mifare, más abajo)
   //   Salidas P1       = lo que contó bajando en los viajes + lo que bajó fuera de ellos;   Salidas P2 = 0
-  //   Total salidas     = Salidas P1 + Salidas P2 - Viajes realizados - Ajustes;   Dif = Ingresos - Total salidas
+  //   Total salidas     = Salidas P1 + Salidas P2 - Pasajeros metro - 2 x Viajes realizados - Ajustes
+  //   Dif               = Ingresos - Total salidas
+  // El Metro y los 2 por viaje los pidió el usuario el 15-oct-2026 (el 703 del 1-oct: 163 - 31 - 18 = 114).
   // En el Excel, Ingresos, Total salidas y Dif van con esas fórmulas. Lo escrito a mano va en movilidad_ajustes y
   // los archivos planos (Metro, cívica) en movilidad_externos (almacentro/enturnes/sql/movilidad.sql, versión 2:
   // trae también las salidas fuera de los viajes). Sin ese SQL se ve igual, pero sin ajustes ni lo de fuera.
@@ -1904,12 +1906,13 @@
     r.descuento = 0;                                  // Descuento>20 en cero: sin tope (15-oct-2026)
     r.ajuste = r.manual + r.gestores + r.correccion;
     // Viajes realizados: solo los que tienen despacho. Los sin despacho Sonar los pone como "sin ruta": su gente
-    // suma en Sonar, pero no restan 1 (así coincide con la movilidad hecha con 700control, 15-oct-2026).
+    // suma en Sonar, pero no restan (así coincide con la movilidad hecha con 700control, 15-oct-2026).
     r.viajesReal = r.viajes - r.sd;
-    r.ingresos = r.sonar - r.descuento - r.viajesReal - r.ajuste;
+    // Se restan el Metro y 2 por cada viaje, en los ingresos y en las salidas: la Dif no cambia (15-oct-2026).
+    r.ingresos = r.sonar - r.descuento - n(r.metro) - 2 * r.viajesReal - r.ajuste;
     r.salidasP1 = r.bajadas + n(r.salenFuera);
     r.salidasP2 = 0;                                  // el sensor no separa las puertas
-    r.salidas = r.salidasP1 + r.salidasP2 - r.viajesReal - r.ajuste;
+    r.salidas = r.salidasP1 + r.salidasP2 - n(r.metro) - 2 * r.viajesReal - r.ajuste;
     r.dif = r.ingresos - r.salidas;
     var partes = [];
     MOV_MOTIVOS.forEach(function (motivo) {
@@ -2104,8 +2107,8 @@
       }).join("") + "</tr></tfoot>";
     }
     html += "</table></div>" +
-      '<p class="pie">Ingresos totales = Sonar − Descuento&gt;20 − Viajes realizados − Ajustes. Total salidas = Salidas P1 + Salidas P2 − ' +
-      "Viajes realizados − Ajustes. Dif = Ingresos − Total salidas. Sin ruta (lo de fuera del viaje a viaje) ya va dentro de Sonar. " +
+      '<p class="pie">Ingresos totales = Sonar − Descuento&gt;20 − Pasajeros metro − 2 × Viajes realizados − Ajustes. ' +
+      "Total salidas = Salidas P1 + Salidas P2 − Pasajeros metro − 2 × Viajes realizados − Ajustes. Dif = Ingresos − Total salidas. Sin ruta (lo de fuera del viaje a viaje) ya va dentro de Sonar. " +
       "Viajes realizados cuenta los viajes con despacho: los sin despacho suman en Sonar, pero no restan." +
       (puede ? " Los ajustes se escriben con el botón de cada bus." : "") + "</p>";
     $("movTabla").innerHTML = html;
@@ -2472,11 +2475,11 @@
       var f = new Date(r.dia + "T12:00:00Z");
       var fila = ws.addRow([
         vehiculoMov(r.interno),
-        formula("U" + k + "-R" + k + "-V" + k + "-N" + k, r.ingresos),     // Ingresos = Sonar - Desc>20 - Viajes - Ajustes
+        formula("U" + k + "-R" + k + "-Q" + k + "-2*V" + k + "-N" + k, r.ingresos),   // Ingresos = Sonar - Desc>20 - Metro - 2 x Viajes - Ajustes
         null,
         r.salidasP1,
         r.salidasP2,
-        formula("D" + k + "+E" + k + "-V" + k + "-N" + k, r.salidas),       // Total salidas = P1 + P2 - Viajes - Ajustes
+        formula("D" + k + "+E" + k + "-Q" + k + "-2*V" + k + "-N" + k, r.salidas),   // Total salidas = P1 + P2 - Metro - 2 x Viajes - Ajustes
         formula("B" + k + "-F" + k, r.dif),                                // Dif = Ingresos - Total salidas
         MOV_RUTA,
         fechaExcel(r.dia),
@@ -2573,17 +2576,17 @@
       [
         "Movilidad de la ruta " + MOV_RUTA + " sacada del Portal de Control, del " + m.desde + " al " + m.hasta +
           ": un renglón por bus y día, como la hoja Base de datos de Movilidad 2026 (las mismas 25 columnas, en el mismo orden).",
-        "Con la regla de la plantilla 700control. Van con fórmula, y se recalculan si cambia un número del renglón:",
-        "   Ingresos totales (B) = Sonar (U) - Descuento>20 (R) - Viajes realizados (V) - Ajustes (N)",
-        "   Total salidas (F) = Salidas P1 (D) + Salidas P2 (E) - Viajes realizados (V) - Ajustes (N)",
+        "Con la regla de la plantilla 700control, más el Metro y 2 por viaje. Van con fórmula, y se recalculan si cambia un número del renglón:",
+        "   Ingresos totales (B) = Sonar (U) - Descuento>20 (R) - Pasajeros metro (Q) - 2 x Viajes realizados (V) - Ajustes (N)",
+        "   Total salidas (F) = Salidas P1 (D) + Salidas P2 (E) - Pasajeros metro (Q) - 2 x Viajes realizados (V) - Ajustes (N)",
         "   Dif (G) = Ingresos totales (B) - Total salidas (F)",
         "Sonar: todo lo que contó la puerta entrando en el día, en los viajes y fuera del viaje a viaje.",
         "Sin ruta: lo que entró fuera del viaje a viaje (en la ruta sin viaje, y en el patio o el taller). Ya va dentro de Sonar y de los ingresos: la columna solo lo muestra.",
         "Salidas P1: lo que contó bajando en los viajes más lo que bajó fuera de ellos. Salidas P2 va en 0: el sensor no separa las puertas.",
         "Descuento>20 va en 0: sin tope por viaje.",
         "Ajustes: los que escribieron los despachadores en Control (taller, administrativo, despachador...), más los gestores que subieron con su código y lo que control corrigió en un viaje.",
-        "Viajes realizados: los viajes con despacho. Los sin despacho Sonar los pone como \"sin ruta\": su gente suma en Sonar, pero no restan 1.",
-        "Pasajeros metro: los usos de la tarjeta Mifare (cívica) de ese bus, del archivo de la liquidación. Cada archivo va al día en que se usaron los pasajes (el \"01-10\" trae los del 30 de septiembre) y la placa se pasa a bus con las placas de Sonar.",
+        "Viajes realizados: los viajes con despacho; cada uno resta 2. Los sin despacho Sonar los pone como \"sin ruta\": su gente suma en Sonar, pero no restan.",
+        "Pasajeros metro: los usos de la tarjeta Mifare (cívica) de ese bus, del archivo de la liquidación. Cada archivo va al día en que se usaron los pasajes (el \"01-10\" trae los del 30 de septiembre) y la placa se pasa a bus con las placas de Sonar. Se restan de los ingresos y de las salidas; si el día no tiene archivo cargado, va vacío y no resta.",
         "El bus va como texto y con un espacio al final (\"703 \"), menos el 710 y el 756, igual que en Movilidad 2026.",
         "La hoja Resumen por día suma la Base de datos con fórmulas.",
       ].forEach(function (t) { N.addRow([t]); });
