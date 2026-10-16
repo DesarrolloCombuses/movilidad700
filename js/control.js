@@ -83,8 +83,8 @@
     },
     inf: { desde: null, hasta: null, por: "interno", base: baseGuardada(), filas: null, porBus: null, conBases: false,
       error: null, cargando: false, progreso: 0, orden: null },
-    // Gestores (sql v8): sus celulares y lo que el programa decidió de cada código que leyó un conductor
-    ges: { fecha: null, lecturas: null, celulares: null, error: null, cargando: false },
+    // Personal de la empresa (sql v10): quién leyó el código del bus, en qué viaje (la pestaña Personal)
+    ges: { fecha: null, registros: null, fotos: {}, error: null, cargando: false },
     // Movilidad: la Base de datos de Movilidad 2026 (movilidad.sql: ajustes y archivos planos)
     mov: { desde: null, hasta: null, datos: null, filas: null, error: null, cargando: false, resumenAbierto: false,
       noRealizados: null, noRealizadosError: null, noRealizadosPromesa: null, noRealizadosAbierto: true,
@@ -337,6 +337,12 @@
       state.v8 = !v8.error;
       if (state.v8 && CAMPOS_VIAJE.indexOf(",gestores") < 0) CAMPOS_VIAJE += ",gestores";
     } catch (_) { state.v8 = false; }
+    // ¿Y la v10? Con ella llega el personal de la empresa que se registró en cada viaje.
+    try {
+      var v10 = await conTiempo(client.from("v_tarjeta_viajes").select("personal").limit(1), 15000);
+      state.v10 = !v10.error;
+      if (state.v10 && CAMPOS_VIAJE.indexOf(",personal") < 0) CAMPOS_VIAJE += ",personal,personal_detalle";
+    } catch (_) { state.v10 = false; }
     var rol = $("quienRol");
     rol.textContent = state.revisor ? "Puede corregir" : "Solo lectura";
     rol.setAttribute("data-tono", state.revisor ? "ok" : "revisa");
@@ -925,6 +931,9 @@
         // v8: los gestores que se subieron (solo los ven los despachadores)
         state.v8 ? conTiempo(client.from("tarjeta_gestores").select(CAMPOS_GESTOR).eq("interno", interno).eq("dia", fecha).order("leido_en"))
           .catch(function () { return { data: [] }; }) : Promise.resolve({ data: [] }),
+        // v10: el personal de la empresa que se registró en este bus este día
+        state.v10 ? conTiempo(client.from("v_personal_viajes").select(CAMPOS_PERSONAL).eq("interno", interno).eq("dia", fecha)
+          .order("leido_en")).catch(function () { return { data: [] }; }) : Promise.resolve({ data: [] }),
       ]);
       if (res[0].error) throw res[0].error;
       if (b.interno !== interno || b.fecha !== fecha) return;
@@ -940,6 +949,9 @@
       b.danos = res[5].data || [];
       b.diaManual = res[6].data || null;
       b.gestores = res[9] && res[9].data || [];
+      b.personal = res[10] && res[10].data || [];
+      b.fotosPersonal = await fotosDelPersonal(b.personal.map(function (p) { return p.id_local; }))
+        .catch(function () { return {}; });
       b.error = null;
       // lo manual de cada viaje (quién escribió el control): se pide con las claves ya sabidas
       var claves = b.filas.map(function (f) { return f.clave; });
@@ -1075,7 +1087,9 @@
       '<td class="n"><strong>' + n(f.pasajeros_sensor) + '</strong><span class="menor">subieron ' + n(f.subidas) +
         (f.estado_calculo === "en_curso" ? ", hasta ahora" : "") + "</span>" +
         (n(f.gestores) ? '<span class="menor gestor-menos">' + (n(f.gestores) === 1 ? "+1 gestor" : "+" + n(f.gestores) + " gestores") +
-          " (no cuenta)</span>" : "") + "</td>" +
+          " (no cuenta)</span>" : "") +
+        (n(f.personal) ? '<span class="menor personal-mas">incluye ' + (n(f.personal) === 1 ? "1 del personal" : n(f.personal) + " del personal") +
+          " (no se cobra)</span>" : "") + "</td>" +
       '<td class="n">' + (f.pasajeros_conductor != null ? "<strong>" + esc(f.pasajeros_conductor) + "</strong>" +
         (f.pasajeros_conductor_corregidos ? '<span class="menor">corregido</span>' : "") : chip("", "falta")) + "</td>" +
       '<td class="n">' + (dif == null ? "—" : '<span class="' + claseDif(dif) + '">' + numDif(dif) + '</span><span class="menor">' +
@@ -1088,7 +1102,8 @@
         : chip("", "falta")) + "</td>" +
       '<td class="n">' + (f.tiquetes_escaneados != null ? esc(f.tiquetes_escaneados) + (f.tiquetes_corregidos ? '<span class="menor">corregidos</span>' : "")
         : chip("", "falta")) + "</td>" +
-      "<td>" + esc(f.control || "") + (f.observaciones ? '<span class="menor">' + esc(f.observaciones) + "</span>" : "") + "</td>" +
+      "<td>" + esc(f.control || "") + (f.observaciones ? '<span class="menor">' + esc(f.observaciones) + "</span>" : "") +
+        (f.personal_detalle ? '<span class="menor personal-obs">Personal: ' + esc(f.personal_detalle) + "</span>" : "") + "</td>" +
       '<td class="no-imprimir"><button class="btn-link" type="button" tabindex="-1">' + (abierto ? "Cerrar" : "Ver") + "</button></td>" +
       "</tr>";
   }
@@ -1152,6 +1167,19 @@
       }
       der += "</div>";
     });
+
+    // v10: el personal de la empresa que se registró en este viaje (suma en pasajeros, no se cobra)
+    var delPersonal = (b.personal || []).filter(function (p) { return p.clave === f.clave; });
+    if (delPersonal.length) {
+      der += '<div class="registro"><div class="registro-cabeza"><b>Personal de la empresa</b></div><ul class="gestores-lista">' +
+        delPersonal.map(function (p) {
+          var foto = (b.fotosPersonal || {})[p.id_local];
+          return '<li class="personal-item">' + selfieDe(foto, p.nombre) + "<span><strong>" + esc(capitalizar(p.nombre)) +
+            "</strong> · " + esc(capitalizar(p.cargo)) + " · " + hora(p.leido_en) +
+            (foto && foto.lat != null ? " · " + lugarDe(foto) : "") + "</span></li>";
+        }).join("") + "</ul>" +
+        '<p class="nota">Leyó el código del bus en el celular del conductor. Va en los pasajeros del viaje, pero su pasaje no se cobra.</p></div>';
+    }
 
     // Gestores que se subieron en este viaje (v8): el sensor los contó; la tarjeta resta los que cuadran
     var suyos = (b.gestores || []).filter(function (g) { return g.clave_viaje === f.clave; });
@@ -1501,12 +1529,10 @@
       });
   }
 
-  // ================================================================ gestores (sql v8)
-  // El gestor activa su celular en el Portal del Conductor (selfie + huella) y aquí un despachador lo
-  // aprueba. Después, cada código que lee un conductor lo revisa el programa de la oficina y queda en
-  // tarjeta_gestores: si se restó del viaje o por qué no. Solo los despachadores ven estas tablas.
+  // ================================================================ gestores (sql v8, ya no se usa)
+  // Lo de la v8 (el gestor mostraba un código con la huella y el conductor lo leía) quedó sin uso desde el
+  // 16-oct: si algún día hubiera algo en tarjeta_gestores, la tarjeta del bus lo sigue mostrando.
   var CAMPOS_GESTOR = "id_local,dia,interno,clave_viaje,dni,nombre,marcado_en,leido_en,lat,lon,donde,valido,resta,motivo";
-  var CAMPOS_CELULAR = "id,dni,nombre,cargo,selfie,dispositivo,pedido_en,pedido_por,estado,aprobado_en,revisado_por,revisado_en,nota";
   var COLOR_GESTOR = "#7c3aed";
 
   function resultadoGestor(g) {
@@ -1515,13 +1541,47 @@
     return chip("revisa", "No se restó");
   }
 
-  function dispositivoCorto(ua) {
-    ua = String(ua || "");
-    var m = ua.match(/Android [\d.]+(?:; ([^;)]+))?/);
-    if (m) return "Android" + (m[1] && !/^K$/.test(m[1].trim()) ? " · " + m[1].trim() : "");
-    if (/iPhone|iPad/.test(ua)) return /iPad/.test(ua) ? "iPad" : "iPhone";
-    if (/Windows/.test(ua)) return "Windows";
-    return ua.slice(0, 40) || "—";
+  // ================================================================ personal de la empresa (sql v10)
+  // Al subir, el conductor muestra en su celular el código del bus y la persona (gestora, auxiliar,
+  // mecánico...) lo lee con la app del personal y se toma una selfie. Supabase pega cada registro al
+  // viaje de ese bus: suma en los pasajeros, su pasaje no se cobra y quién fue va en las observaciones.
+  // Quién, bus, viaje y hora los ve cualquiera con sesión (v_personal_viajes); la selfie, la cédula y el
+  // lugar, solo los despachadores (personal_subidas). La pestaña conserva el enlace #/gestores.
+  var CAMPOS_PERSONAL = "id_local,dia,interno,viaje,clave,despacho_en,nombre,cargo,leido_en,recibido_en";
+  var CAMPOS_PERSONAL_HOJA = "id_local,dni,dni_conductor,selfie,lat,lon,precision_m,dispositivo";
+
+  // La selfie y el lugar de unos registros (solo los despachadores; a los demás no les llega nada).
+  async function fotosDelPersonal(ids) {
+    var fotos = {};
+    if (!state.revisor || !ids.length) return fotos;
+    for (var i = 0; i < ids.length; i += 100) {
+      var res = await conTiempo(client.from("personal_subidas").select(CAMPOS_PERSONAL_HOJA).in("id_local", ids.slice(i, i + 100)));
+      if (res.error) throw res.error;
+      (res.data || []).forEach(function (x) { fotos[x.id_local] = x; });
+    }
+    return fotos;
+  }
+
+  function selfieDe(foto, nombre) {
+    return foto && /^data:image\//.test(foto.selfie || "")
+      ? '<img class="selfie selfie-personal" src="' + esc(foto.selfie) + '" alt="Selfie de ' + esc(capitalizar(nombre)) +
+        '" title="Ver la foto" data-selfie="' + esc(foto.id_local) + '">'
+      : "";
+  }
+
+  function lugarDe(foto) {
+    if (!foto || foto.lat == null || foto.lon == null) return "—";
+    return '<a href="https://www.google.com/maps?q=' + Number(foto.lat).toFixed(6) + "," + Number(foto.lon).toFixed(6) +
+      '" target="_blank" rel="noopener">Ver en el mapa</a>' +
+      (foto.precision_m ? '<span class="menor">± ' + Math.round(foto.precision_m) + " m</span>" : "");
+  }
+
+  function verSelfie(id) {
+    var foto = (state.ges.fotos || {})[id] || (state.bus.fotosPersonal || {})[id];
+    if (!foto) return;
+    abrirHoja("Selfie al registrarse", '<img class="selfie-foto" src="' + esc(foto.selfie) + '" alt="Selfie">' +
+      '<p class="nota">Cédula ' + esc(foto.dni) + (foto.dni_conductor ? " · el código lo mostró el conductor de cédula " + esc(foto.dni_conductor) : "") +
+      "</p>");
   }
 
   function abrirGestores(fecha) {
@@ -1530,8 +1590,8 @@
     g.fecha = fecha;
     $("gesFecha").value = fecha;
     actualizarPestanas();
-    if (cambio || !g.lecturas) {
-      g.lecturas = null;
+    if (cambio || !g.registros) {
+      g.registros = null;
       g.error = null;
       pintarGestores();
       cargarGestores();
@@ -1542,19 +1602,16 @@
 
   async function cargarGestores() {
     var g = state.ges, fecha = g.fecha;
-    if (!state.v8) { pintarGestores(); return; }
+    if (!state.v10) { pintarGestores(); return; }
     g.cargando = true;
     try {
-      var res = await Promise.all([
-        conTiempo(client.from("tarjeta_gestores").select(CAMPOS_GESTOR).eq("dia", fecha).order("leido_en")),
-        conTiempo(client.from("gestores_celulares").select(CAMPOS_CELULAR).in("estado", ["pendiente", "aprobado"])
-          .order("pedido_en", { ascending: false })),
-      ]);
-      if (res[0].error) throw res[0].error;
-      if (res[1].error) throw res[1].error;
+      var res = await conTiempo(client.from("v_personal_viajes").select(CAMPOS_PERSONAL).eq("dia", fecha).order("leido_en"));
+      if (res.error) throw res.error;
+      var fotos = await fotosDelPersonal((res.data || []).map(function (x) { return x.id_local; }))
+        .catch(function () { return {}; });
       if (g.fecha !== fecha) return;
-      g.lecturas = res[0].data || [];
-      g.celulares = res[1].data || [];
+      g.registros = res.data || [];
+      g.fotos = fotos;
       g.error = null;
     } catch (err) {
       if (g.fecha === fecha) g.error = err;
@@ -1564,135 +1621,52 @@
     }
   }
 
-  function tarjetaCelular(c) {
-    var aprobado = c.estado === "aprobado";
-    var otro = !aprobado && (state.ges.celulares || []).some(function (x) { return x.dni === c.dni && x.estado === "aprobado"; });
-    return '<div class="celular" data-estado="' + esc(c.estado) + '">' +
-      (/^data:image\//.test(c.selfie || "") ? '<img class="selfie" src="' + esc(c.selfie) + '" alt="Selfie de ' + esc(c.nombre) + '">' : '<span class="selfie"></span>') +
-      '<div class="celular-datos"><strong>' + esc(capitalizar(c.nombre || "Sin nombre")) + "</strong>" +
-        '<span class="menor">' + esc(capitalizar(c.cargo || "")) + " · cédula " + esc(c.dni) + "</span>" +
-        '<span class="menor">' + esc(dispositivoCorto(c.dispositivo)) + " · " +
-          (aprobado ? "aprobado el " + esc(momento(c.aprobado_en)) + (c.revisado_por ? " por " + esc(c.revisado_por) : "")
-            : "lo pidió el " + esc(momento(c.pedido_en))) + "</span>" +
-        (otro ? '<span class="menor aviso-cambio">Ya tiene otro celular aprobado: al aprobar este, el otro deja de servir.</span>' : "") +
-        (c.nota ? '<span class="menor">“' + esc(c.nota) + "”</span>" : "") +
-      "</div>" +
-      (state.revisor
-        ? '<div class="acciones">' + (aprobado
-            ? '<button class="btn btn-chico" type="button" data-celular-quitar="' + esc(c.id) + '">Quitar el celular</button>'
-            : '<button class="btn btn-chico btn-primario" type="button" data-celular-aprobar="' + esc(c.id) + '">Aprobar</button>' +
-              '<button class="btn btn-chico" type="button" data-celular-rechazar="' + esc(c.id) + '">Rechazar</button>') + "</div>"
-        : "") +
-      "</div>";
-  }
-
   function pintarGestores() {
     var g = state.ges;
     var cuerpo = $("gesCuerpo");
-    $("gesSub").textContent = fechaLarga(g.fecha) + " (" + textoCorte() + "). El sensor de la puerta cuenta a los gestores " +
-      "como pasajeros: con su código, la tarjeta los resta.";
-    if (!state.v8) {
-      cuerpo.innerHTML = '<p class="caja-error">Falta correr la versión 8 del SQL de la tarjeta en Supabase. Con ella llegan los ' +
-        "celulares de los gestores y lo que leen los conductores.</p>";
+    $("gesSub").textContent = fechaLarga(g.fecha) + " (" + textoCorte() + "). La persona se registra al subir, leyendo el " +
+      "código del bus en el celular del conductor: suma en los pasajeros del viaje, pero su pasaje no se cobra.";
+    if (!state.v10) {
+      cuerpo.innerHTML = '<p class="caja-error">Falta correr personal_empresa.sql (la versión 10 del SQL de la tarjeta) en Supabase.</p>';
       return;
     }
-    if (!state.revisor) {
-      cuerpo.innerHTML = '<p class="vacio">Solo los despachadores (tarjeta_revisores) ven los gestores y aprueban sus celulares.</p>';
+    if (!g.registros) {
+      cuerpo.innerHTML = g.error ? cajaError("No se pudo traer el personal: " + textoError(g.error), "recargar-gestores")
+        : '<p class="cargando">Trayendo el personal…</p>';
       return;
     }
-    if (!g.lecturas) {
-      cuerpo.innerHTML = g.error ? cajaError("No se pudo traer lo de los gestores: " + textoError(g.error), "recargar-gestores")
-        : '<p class="cargando">Trayendo lo de los gestores…</p>';
-      return;
-    }
-    var pendientes = (g.celulares || []).filter(function (c) { return c.estado === "pendiente"; });
-    var aprobados = (g.celulares || []).filter(function (c) { return c.estado === "aprobado"; });
-    var restadas = g.lecturas.filter(function (x) { return x.resta; }).length;
-    var raras = g.lecturas.filter(function (x) { return !x.resta && /^Sospechoso/.test(x.motivo || ""); }).length;
+    var personas = {}, buses = {};
+    g.registros.forEach(function (r) { personas[r.nombre + "|" + r.cargo] = true; buses[r.interno] = true; });
+    var sinViaje = g.registros.filter(function (r) { return !r.clave; }).length;
     function caja(titulo, grande, chico, tono) {
       return '<div class="total"' + (tono ? ' data-tono="' + tono + '"' : "") + "><span>" + titulo + "</span><strong>" + grande + "</strong>" +
         (chico ? "<small>" + chico + "</small>" : "") + "</div>";
     }
     var html = '<div class="totales">' +
-      caja("Códigos leídos", g.lecturas.length, "por los conductores este día") +
-      caja("Se restaron", restadas, "no cuentan como pasajeros", restadas ? "bien" : "") +
-      caja("No se restaron", g.lecturas.length - restadas - raras, "el motivo está en cada uno", g.lecturas.length - restadas - raras ? "revisa" : "") +
-      caja("Sospechosos", raras, raras ? "revíselos" : "ninguno", raras ? "mal" : "") +
-      caja("Celulares por aprobar", pendientes.length, aprobados.length + " aprobados", pendientes.length ? "revisa" : "") +
+      caja("Registros", g.registros.length, "leyeron el código del bus") +
+      caja("Personas", Object.keys(personas).length, "distintas") +
+      caja("Buses", Object.keys(buses).length, "con alguien de la empresa") +
+      caja("Sin viaje", sinViaje, sinViaje ? "no se encontró el viaje: revíselos" : "todos van en un viaje", sinViaje ? "revisa" : "") +
       "</div>";
-
-    html += '<div class="bloque"><h2 class="titulo-bloque">Celulares por aprobar</h2>' + (pendientes.length
-      ? '<p class="nota">Mire que la foto sea de la persona. Al aprobarlo, su código sirve en todos los buses.</p>' +
-        '<div class="celulares">' + pendientes.map(tarjetaCelular).join("") + "</div>"
-      : '<p class="nota">Ningún celular esperando. El gestor lo pide desde el Portal del Conductor, en Mi código.</p>') + "</div>";
-
-    html += '<div class="bloque"><h2 class="titulo-bloque">Lo que leyeron los conductores</h2>';
-    if (!g.lecturas.length) {
-      html += '<p class="vacio">Ningún conductor leyó códigos de gestores este día. Lo leído aparece después de la siguiente ' +
-        "vuelta del programa de la oficina (cada 5 minutos).</p>";
+    if (!state.revisor) {
+      html += '<p class="nota">La selfie, la cédula y el lugar solo los ven los despachadores (tarjeta_revisores).</p>';
+    }
+    if (!g.registros.length) {
+      html += '<p class="vacio">Nadie de la empresa se registró en los buses este día.</p>';
     } else {
-      html += '<div class="tabla-caja"><table><thead><tr><th>Hora</th><th>Bus</th><th>Gestor</th><th>Dónde</th><th>Resultado</th></tr></thead><tbody>' +
-        g.lecturas.map(function (x) {
-          return '<tr class="fila-link" tabindex="0" data-bus="' + esc(x.interno) + '" data-fecha="' + esc(x.dia) + '">' +
-            '<td class="num">' + hora(x.leido_en) + "</td><td><strong>" + esc(x.interno) + "</strong></td>" +
-            "<td>" + esc(capitalizar(x.nombre || "Sin nombre")) + '<span class="menor">cédula ···' + esc(String(x.dni || "").slice(-4)) + "</span></td>" +
-            "<td>" + esc(x.donde || "—") + "</td>" +
-            "<td>" + resultadoGestor(x) + (x.motivo ? '<span class="menor">' + esc(x.motivo) + "</span>" : "") + "</td></tr>";
+      html += '<div class="tabla-caja"><table><thead><tr><th>Hora</th><th>Bus</th><th>Viaje</th><th>Persona</th>' +
+        (state.revisor ? "<th>Selfie</th><th>Dónde</th>" : "") + "</tr></thead><tbody>" +
+        g.registros.map(function (r) {
+          var foto = (g.fotos || {})[r.id_local];
+          return '<tr class="fila-link" tabindex="0" data-bus="' + esc(r.interno) + '" data-fecha="' + esc(r.dia) + '">' +
+            '<td class="num">' + hora(r.leido_en) + "</td><td><strong>" + esc(r.interno) + "</strong></td>" +
+            "<td>" + (r.clave ? "Viaje " + esc(r.viaje) + '<span class="menor">salió ' + hora(r.despacho_en) + "</span>"
+              : chip("revisa", "sin viaje") + '<span class="menor">ese bus no tenía un viaje a esa hora</span>') + "</td>" +
+            "<td><strong>" + esc(capitalizar(r.nombre || "Sin nombre")) + '</strong><span class="menor">' + esc(capitalizar(r.cargo || "")) + "</span></td>" +
+            (state.revisor ? "<td>" + (selfieDe(foto, r.nombre) || "—") + "</td><td>" + lugarDe(foto) + "</td>" : "") + "</tr>";
         }).join("") + "</tbody></table></div>";
     }
-    html += "</div>";
-
-    html += '<div class="bloque"><h2 class="titulo-bloque">Celulares aprobados</h2>' + (aprobados.length
-      ? '<div class="celulares">' + aprobados.map(tarjetaCelular).join("") + "</div>"
-      : '<p class="nota">Todavía no hay celulares aprobados.</p>') + "</div>";
     cuerpo.innerHTML = html;
-  }
-
-  // Aprobar, rechazar o quitar el celular de un gestor (gestor_revisar_celular: solo un despachador)
-  function abrirRevisarCelular(id, accion) {
-    var c = (state.ges.celulares || []).filter(function (x) { return String(x.id) === String(id); })[0];
-    if (!c) return;
-    var aprobar = accion === "aprobar";
-    var titulos = { aprobar: "Aprobar el celular", rechazar: "Rechazar el celular", quitar: "Quitar el celular" };
-    var explica = {
-      aprobar: "Desde ya, los códigos de " + capitalizar(c.nombre) + " sirven en todos los buses y se restan de los pasajeros." +
-        ((state.ges.celulares || []).some(function (x) { return x.dni === c.dni && x.estado === "aprobado"; })
-          ? " El celular que tenía aprobado deja de servir." : ""),
-      rechazar: "El gestor tiene que activar su celular otra vez (por ejemplo, con otra foto).",
-      quitar: "Sus códigos dejan de servir desde ya. Lo de antes se queda como estaba.",
-    };
-    abrirHoja(titulos[accion],
-      (/^data:image\//.test(c.selfie || "") ? '<img class="selfie selfie-grande" src="' + esc(c.selfie) + '" alt="Selfie">' : "") +
-      "<p><strong>" + esc(capitalizar(c.nombre)) + "</strong> · " + esc(capitalizar(c.cargo)) + " · cédula " + esc(c.dni) + "</p>" +
-      '<p class="nota">' + esc(explica[accion]) + "</p>" +
-      '<form id="formCelular" novalidate><label class="campo"><span>Nota' + (aprobar ? " (si quiere)" : " (obligatoria: por qué)") + "</span>" +
-        '<textarea id="celularNota" maxlength="300"></textarea></label>' +
-        '<p id="celularError" class="error" hidden style="margin-top:10px"></p>' +
-        '<div class="acciones"><button class="btn ' + (aprobar ? "btn-primario" : "btn-peligro") + '" type="submit" id="celularGuardar">' +
-          esc(titulos[accion].replace(" el celular", "")) + '</button><button class="btn" type="button" data-cerrar-hoja>Cancelar</button></div></form>',
-      function (caja) {
-        caja.querySelector("#formCelular").addEventListener("submit", async function (ev) {
-          ev.preventDefault();
-          var nota = $("celularNota").value.trim();
-          if (!aprobar && !nota) {
-            $("celularError").textContent = "Escriba por qué.";
-            $("celularError").hidden = false;
-            return;
-          }
-          $("celularGuardar").disabled = true;
-          try {
-            var res = await conTiempo(client.rpc("gestor_revisar_celular", { p_id: c.id, p_aprobar: aprobar, p_nota: nota || null }));
-            if (res.error) throw res.error;
-            cerrarHoja();
-            aviso(aprobar ? "Celular aprobado." : accion === "quitar" ? "Celular quitado." : "Celular rechazado.");
-            cargarGestores();
-          } catch (err) {
-            $("celularError").textContent = textoError(err);
-            $("celularError").hidden = false;
-            $("celularGuardar").disabled = false;
-          }
-        });
-      });
   }
 
   // ================================================================ MOVILIDAD: la "Base de datos" de Movilidad 2026
@@ -2954,7 +2928,10 @@
       "Cívicas": f.civicas == null ? "" : n(f.civicas),
       "Estado cívica": (ESTADO_CIVICA[f.estado_civica] || ["", f.estado_civica || ""])[1],
       "Tiquetes": f.tiquetes_escaneados == null ? "" : n(f.tiquetes_escaneados),
-      "Control": f.control || "", "Observaciones": f.observaciones || "",
+      "Control": f.control || "",
+      "Observaciones": [f.observaciones, f.personal_detalle ? "Personal de la empresa (no se cobra): " + f.personal_detalle : ""]
+        .filter(Boolean).join(" · "),
+      "Personal de la empresa (no se cobra)": n(f.personal),
       "Corregido": [f.lectura_corregida && "cívica", f.pasajeros_conductor_corregidos && "pasajeros", f.tiquetes_corregidos && "tiquetes"].filter(Boolean).join(", "),
       "Estado": f.estado_calculo === "en_curso" ? "en camino" : f.estado_calculo === "definitivo" ? "definitivo" : "provisional",
       "Número de despacho": f.sin_despacho ? "" : f.clave,
@@ -3675,7 +3652,7 @@
     });
     $("infExcel").addEventListener("click", excelInforme);
 
-    // Gestores
+    // Personal de la empresa (antes Gestores)
     $("gesFecha").addEventListener("change", function () { if (esFecha(this.value)) location.hash = "#/gestores/" + this.value; });
     $("gesAntes").addEventListener("click", function () { location.hash = "#/gestores/" + sumarDias(state.ges.fecha, -1); });
     $("gesDespues").addEventListener("click", function () { location.hash = "#/gestores/" + sumarDias(state.ges.fecha, 1); });
@@ -3742,9 +3719,7 @@
       if ((el = t.closest("[data-foto]"))) return verFoto(el.getAttribute("data-foto"));
       if ((el = t.closest("[data-dano-aprobar]"))) return abrirRevisarDano(el.getAttribute("data-dano-aprobar"), true);
       if ((el = t.closest("[data-dano-rechazar]"))) return abrirRevisarDano(el.getAttribute("data-dano-rechazar"), false);
-      if ((el = t.closest("[data-celular-aprobar]"))) return abrirRevisarCelular(el.getAttribute("data-celular-aprobar"), "aprobar");
-      if ((el = t.closest("[data-celular-rechazar]"))) return abrirRevisarCelular(el.getAttribute("data-celular-rechazar"), "rechazar");
-      if ((el = t.closest("[data-celular-quitar]"))) return abrirRevisarCelular(el.getAttribute("data-celular-quitar"), "quitar");
+      if ((el = t.closest("[data-selfie]"))) return verSelfie(el.getAttribute("data-selfie"));
       if (t.closest("a, input, textarea, select, form")) return;
       if ((el = t.closest("tr[data-mov-dia]"))) {
         var dia = el.getAttribute("data-mov-dia");

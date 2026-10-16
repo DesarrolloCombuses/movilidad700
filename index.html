@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./css/control.css?v=0.9.5">
+  <link rel="stylesheet" href="./css/control.css?v=0.10.0">
 </head>
 <body>
 
@@ -53,7 +53,7 @@
       <a href="#/bus" data-pestana="bus">Tarjeta del bus</a>
       <a href="#/informes" data-pestana="informes">Informes</a>
       <a href="#/movilidad" data-pestana="movilidad">Movilidad</a>
-      <a href="#/gestores" data-pestana="gestores">Gestores</a>
+      <a href="#/gestores" data-pestana="gestores">Personal</a>
     </nav>
     <div class="quien">
       <span id="quienCorreo" class="quien-correo"></span>
@@ -170,7 +170,7 @@
                 <tr><th scope="row">Sonar</th><td>Todo lo que contó la puerta entrando en el día: en los viajes y fuera de ellos.</td></tr>
                 <tr><th scope="row">Viajes realizados</th><td>Los viajes con despacho. Cada viaje resta 2.</td></tr>
                 <tr><th scope="row">Pasajeros metro</th><td>Los usos de la tarjeta del Metro (Mifare) de ese bus ese día. Llegan con la plantilla metro (punto 2).</td></tr>
-                <tr><th scope="row">Ajustes</th><td>Los que escriben los despachadores con <strong>+ Ajuste</strong>, más los gestores que subieron con su código y lo que control corrigió en un viaje.</td></tr>
+                <tr><th scope="row">Ajustes</th><td>Los que escriben los despachadores con <strong>+ Ajuste</strong>, más los gestores que subieron con su código (lo de antes del 16-oct) y lo que control corrigió en un viaje.</td></tr>
                 <tr><th scope="row">Descuento&gt;20</th><td>Va en 0.</td></tr>
                 <tr><th scope="row">Ingresos totales</th><td><strong>Sonar − Pasajeros metro − 2 × Viajes realizados − Ajustes</strong></td></tr>
                 <tr><th scope="row">Salidas P1</th><td>Lo que contó bajando, en los viajes y fuera de ellos. Salidas P2 va en 0 (el sensor no separa las puertas).</td></tr>
@@ -265,12 +265,12 @@
       <div id="movTabla"></div>
     </section>
 
-    <!-- ---- Gestores: sus celulares (aprobar) y lo que leyeron los conductores ---- -->
+    <!-- ---- Personal de la empresa: quién leyó el código del bus (antes Gestores; el enlace sigue siendo #/gestores) ---- -->
     <section id="vistaGestores" class="vista" hidden>
       <div class="cabeza">
         <div>
-          <h1>Gestores</h1>
-          <p id="gesSub" class="sub">El sensor de la puerta cuenta a los gestores como pasajeros. Con su código, la tarjeta los resta.</p>
+          <h1>Personal de la empresa</h1>
+          <p id="gesSub" class="sub">La persona se registra al subir, leyendo el código del bus: suma en los pasajeros, pero no se cobra.</p>
         </div>
         <div class="controles">
           <button id="gesAntes" class="btn btn-sutil btn-cuadro" type="button" title="Día anterior" aria-label="Día anterior">‹</button>
@@ -307,7 +307,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="./js/control-config.js?v=0.9.5"></script>
-<script src="./js/control.js?v=0.9.5"></script>
+<script src="./js/control-config.js?v=0.10.0"></script>
+<script src="./js/control.js?v=0.10.0"></script>
 </body>
 </html>

@@ -344,6 +344,12 @@ tr.detalle-fila > td { padding: 0; background: var(--panel-2); }
 .gestores-lista { margin: 4px 0 6px; padding-left: 0; list-style: none; }
 .gestores-lista li { padding: 4px 0; border-top: 1px solid var(--line); }
 .gestores-lista li:first-child { border-top: 0; }
+/* v10: el personal de la empresa */
+.personal-item { display: flex; align-items: center; gap: 10px; }
+.selfie-personal { width: 44px; height: 44px; cursor: zoom-in; flex: none; }
+td .selfie-personal { width: 52px; height: 52px; }
+.selfie-foto { display: block; width: min(320px, 100%); margin: 0 auto 10px; border-radius: 14px; }
+.personal-mas, .personal-obs { color: #5b21b6; }
 .celulares { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
 .celular {
   display: grid; grid-template-columns: 64px 1fr; gap: 4px 12px; align-items: start;

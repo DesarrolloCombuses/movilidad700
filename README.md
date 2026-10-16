@@ -29,7 +29,7 @@ Cuando se publica una versión nueva, arriba sale **"Hay una versión nueva del 
 | **Tarjeta del bus** | La tarjeta de papel completa, viaje por viaje. Al abrir un viaje se ve **el mapa de su recorrido** y por qué itinerario fue, cada apertura de puerta (hora, suben, bajan, dónde, sensor tapado), quién escribió cada número y sus correcciones, y el daño del validador con su foto. Excel e imprimir con firmas. |
 | **Informes** | Entre dos fechas, agrupado por bus, conductor, ruta, día o base, o de una sola base. Por conductor sale primero el que más plata dice de menos. El Excel trae el resumen, cada viaje, las correcciones, los daños y los avisos de los buses. |
 | **Movilidad** | La "Base de datos" de Movilidad 2026, como la sacaba 700control: un renglón por bus y día, con las mismas 25 columnas, entre dos fechas y con sus filtros. Los despachadores escriben los **ajustes** (taller, administrativo, despachador). **Descargar Excel** la deja igual al maestro, con las fórmulas, para pegar debajo. |
-| **Gestores** | Los celulares de los gestores **por aprobar** (con su selfie) y los aprobados, y lo que leyeron los conductores cada día: qué se restó, qué no y qué es sospechoso. Solo para despachadores. |
+| **Personal** | El personal de la empresa que se registró en los buses cada día (leyó el código del bus en el celular del conductor): hora, bus, a qué viaje se pegó (o **sin viaje**, para revisar) y quién. Los despachadores ven además la **selfie** (al tocarla se agranda) y **dónde** estaba. Antes se llamaba Gestores (el enlace sigue siendo `#/gestores`). |
 
 ## De dónde salen los datos
 
@@ -53,7 +53,15 @@ El recorrido aparece cuando el viaje llega. Mientras tanto, o si el viaje es de 
 
 Siguen marcados **SIN DESPACHO**, pero ahora dicen a qué itinerario se parecen, por ejemplo *"Aeropuerto → Túnel → CC San Diego · como el 4507 · lo encontró el viaje a viaje"*. Sonar no lo sabe, porque nadie los despachó. Lo deduce el viaje a viaje por el punto donde se subió la gente y el punto donde se bajó. En Informes por ruta van aparte, por ejemplo *"4507 · Aeropuerto → Túnel → CC San Diego (sin despacho)"*. El Excel dice de dónde salió cada viaje: el despacho de Sonar o el viaje a viaje.
 
-### Los gestores (v0.6.0, versión 8 del SQL)
+### El personal de la empresa (v0.10.0, versión 10 del SQL)
+
+Desde el 16-oct-2026 el personal de la empresa (gestoras, auxiliares, mecánicos...) se registra al subir: el conductor muestra en su celular un código que cambia cada 20 segundos y la persona lo lee con la app del personal y se toma una selfie. En el viaje **suma en los pasajeros pero su pasaje no se cobra** (la plata de la tarjeta ya viene sin él).
+
+- **En la tarjeta del bus:** el viaje dice *"incluye 1 del personal (no se cobra)"* y en observaciones *"Personal: María Gómez (Gestor De Movilidad) 10:42"*. Al abrir el viaje sale la persona con su selfie, la hora y dónde estaba.
+- **En el Excel de la tarjeta:** la columna *Personal de la empresa (no se cobra)* y quién fue en Observaciones.
+- Lo de aprobar celulares (lo de abajo, v0.6.0) se quitó: la huella ya no se usa.
+
+### Los gestores (v0.6.0, versión 8 del SQL; ya no se usa desde el 16-oct)
 
 El sensor de la puerta cuenta a los gestores como pasajeros. Ahora el gestor muestra en su celular un código firmado con su huella y el conductor lo lee con su aplicación. El programa de la oficina lo revisa y, si cuadra, lo resta del viaje.
 
