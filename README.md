@@ -68,7 +68,8 @@ Desde el 16-oct-2026 el personal de la empresa (gestoras, auxiliares, mecánicos
 Desde el 16-oct-2026 el conductor reporta novedades en su app: trasbordo, bus varado o daño, accidente o incidente, u otra. Cada una tiene su número (N° 1001...) y puede traer un video de máximo 1 minuto en calidad media.
 
 - **El trasbordo** lo reporta el bus que **recibe** los pasajeros (el 722 se vara y sus 15 pasan al 735: lo reporta el 735). Va **de una vez** a los **Ajustes** de la movilidad de ese bus y ese día: en Observaciones sale *"Trasbordo 15 del 722 (N° 1001)"*, la hoja de ajustes del bus los lista y la hoja *Ajustes* del Excel los trae uno por uno.
-- **Anular:** solo un despachador, en la pestaña Novedades, con el porqué. La novedad no se borra; deja de restar.
+- **Cada novedad va pegada a su viaje** (v0.12.0, sql v11.1): el conductor la reporta desde el viaje en su tarjeta. En la **tarjeta del bus** sale en las observaciones del viaje (*"Novedad N° 1001: Trasbordo 15 del 722"*) y, al abrir el viaje, con su video y el botón de anular; las que no tienen viaje (reportadas sin señal a una hora sin viaje) van debajo de la tabla. El Excel de la tarjeta las trae en Observaciones.
+- **Anular:** solo un despachador, en la pestaña Novedades o en la tarjeta del bus, con el porqué. La novedad no se borra; deja de restar.
 - **Los videos** solo los ven los despachadores (enlace firmado de 1 hora). A los **90 días** se borran: lo hace Control cuando entra un despachador (una vez por sesión), y la novedad queda con *Borrado a los 90 días*.
 
 ### Los gestores (v0.6.0, versión 8 del SQL; ya no se usa desde el 16-oct)

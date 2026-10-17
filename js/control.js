@@ -942,6 +942,9 @@
         // v10: el personal de la empresa que se registró en este bus este día
         state.v10 ? conTiempo(client.from("v_personal_viajes").select(CAMPOS_PERSONAL).eq("interno", interno).eq("dia", fecha)
           .order("leido_en")).catch(function () { return { data: [] }; }) : Promise.resolve({ data: [] }),
+        // v11.1: las novedades que reportó el conductor, cada una en su viaje
+        conTiempo(client.from("conductor_novedades").select(CAMPOS_NOVEDAD).eq("interno", interno).eq("dia", fecha).order("numero"))
+          .catch(function () { return { data: [] }; }),
       ]);
       if (res[0].error) throw res[0].error;
       if (b.interno !== interno || b.fecha !== fecha) return;
@@ -958,6 +961,9 @@
       b.diaManual = res[6].data || null;
       b.gestores = res[9] && res[9].data || [];
       b.personal = res[10] && res[10].data || [];
+      b.novedades = res[11] && !res[11].error ? res[11].data || [] : [];
+      b.novPorClave = {};
+      b.novedades.forEach(function (x) { if (x.clave_viaje) (b.novPorClave[x.clave_viaje] = b.novPorClave[x.clave_viaje] || []).push(x); });
       b.fotosPersonal = await fotosDelPersonal(b.personal.map(function (p) { return p.id_local; }))
         .catch(function () { return {}; });
       b.error = null;
@@ -1055,6 +1061,13 @@
       if (abierto) html += '<tr class="detalle-fila"><td colspan="12">' + detalleViaje(f) + "</td></tr>";
     });
     html += "</tbody></table></div>";
+    var claves = {};
+    b.filas.forEach(function (f) { claves[f.clave] = true; });
+    var sueltas = (b.novedades || []).filter(function (x) { return !x.clave_viaje || !claves[x.clave_viaje]; });
+    if (sueltas.length) {
+      html += '<div class="registro"><div class="registro-cabeza"><b>Novedades del conductor sin viaje</b></div>' +
+        '<ul class="lista-ajustes">' + sueltas.map(liNovedad).join("") + "</ul></div>";
+    }
     html += '<p class="pie no-imprimir">Toque un viaje para ver cada parada, quién escribió cada número y sus correcciones.' +
       (state.revisor ? "" : " Esta cuenta es de solo lectura: para corregir, hay que agregarla a tarjeta_revisores.") + "</p>";
     html += '<div class="firmas"><div>Firma del conductor</div><div>Firma de control</div></div>';
@@ -1111,7 +1124,10 @@
       '<td class="n">' + (f.tiquetes_escaneados != null ? esc(f.tiquetes_escaneados) + (f.tiquetes_corregidos ? '<span class="menor">corregidos</span>' : "")
         : chip("", "falta")) + "</td>" +
       "<td>" + esc(f.control || "") + (f.observaciones ? '<span class="menor">' + esc(f.observaciones) + "</span>" : "") +
-        (f.personal_detalle ? '<span class="menor personal-obs">Personal: ' + esc(f.personal_detalle) + "</span>" : "") + "</td>" +
+        (f.personal_detalle ? '<span class="menor personal-obs">Personal: ' + esc(f.personal_detalle) + "</span>" : "") +
+        novedadesDelViaje(f.clave).map(function (x) {
+          return '<span class="menor nov-obs' + (x.anulado_en ? " nov-anulada" : "") + '">Novedad ' + esc(textoNovedadCorta(x)) + "</span>";
+        }).join("") + "</td>" +
       '<td class="no-imprimir"><button class="btn-link" type="button" tabindex="-1">' + (abierto ? "Cerrar" : "Ver") + "</button></td>" +
       "</tr>";
   }
@@ -1175,6 +1191,13 @@
       }
       der += "</div>";
     });
+
+    // v11.1: las novedades que reportó el conductor en este viaje (con su video y anular)
+    var novs = novedadesDelViaje(f.clave);
+    if (novs.length) {
+      der += '<div class="registro"><div class="registro-cabeza"><b>Novedades del conductor</b></div><ul class="lista-ajustes">' +
+        novs.map(liNovedad).join("") + "</ul></div>";
+    }
 
     // v10: el personal de la empresa que se registró en este viaje (suma en pasajeros, no se cobra)
     var delPersonal = (b.personal || []).filter(function (p) { return p.clave === f.clave; });
@@ -1684,7 +1707,29 @@
   // La hoja (conductor_novedades) la ve cualquiera con sesión; el video, solo los despachadores.
   var NOV_TIPOS = { trasbordo: "Trasbordo", varado: "Bus varado o daño", accidente: "Accidente o incidente", otra: "Otra novedad" };
   var CAMPOS_NOVEDAD = "numero,tipo,dia,interno,interno_origen,cantidad,nota,dni_conductor,nombre_conductor,ocurrio_en," +
-    "recibido_en,lat,lon,precision_m,video_ruta,video_bytes,video_segundos,video_borrado_en,anulado_por_correo,anulado_en,anulado_motivo";
+    "recibido_en,lat,lon,precision_m,video_ruta,video_bytes,video_segundos,video_borrado_en,anulado_por_correo,anulado_en,anulado_motivo," +
+    "clave_viaje,viaje";
+
+  // v11.1: cada novedad va pegada a su viaje (la tarjeta del bus las muestra en su renglón)
+  function novedadesDelViaje(clave) { return ((state.bus.novPorClave || {})[clave] || []); }
+
+  function textoNovedadCorta(x) {
+    return "N° " + x.numero + ": " + (NOV_TIPOS[x.tipo] || x.tipo) +
+      (x.tipo === "trasbordo" ? " " + x.cantidad + " del " + x.interno_origen : "") + (x.anulado_en ? " (anulada)" : "");
+  }
+
+  function liNovedad(x) {
+    return "<li" + (x.anulado_en ? ' class="anulado"' : "") + "><strong>N° " + esc(x.numero) + " · " + esc(NOV_TIPOS[x.tipo] || x.tipo) + "</strong>" +
+      (queDeNovedad(x) ? " · " + esc(queDeNovedad(x)) : "") + " · " + hora(x.ocurrio_en) +
+      (x.video_ruta && !x.video_borrado_en && state.revisor ? ' <button class="btn btn-chico" type="button" data-nov-video="' + esc(x.numero) + '">▶ Ver video</button>' : "") +
+      (!x.anulado_en && state.revisor ? ' <button class="btn btn-chico" type="button" data-nov-anular="' + esc(x.numero) + '">Anular</button>' : "") +
+      '<span class="menor">' + esc(capitalizar(x.nombre_conductor || "")) +
+        (x.tipo === "trasbordo" && x.nota ? " · " + esc(x.nota) : "") +
+        (x.video_ruta ? (x.video_borrado_en ? " · video borrado a los 90 días" : state.revisor ? "" : " · con video") : " · sin video") +
+        (x.tipo === "trasbordo" && !x.anulado_en ? " · resta " + x.cantidad + " en la movilidad" : "") + "</span>" +
+      (x.anulado_en ? '<span class="menor">Anulada por ' + esc(x.anulado_por_correo || "") + " el " + esc(momento(x.anulado_en)) + ": " + esc(x.anulado_motivo || "") + "</span>" : "") +
+      "</li>";
+  }
   var CAMPOS_NOVEDAD_MOV = "numero,dia,interno,interno_origen,cantidad,nombre_conductor,ocurrio_en,anulado_en,anulado_motivo,anulado_por_correo";
 
   function abrirNovedades(desde, hasta) {
@@ -1783,7 +1828,8 @@
           return "<tr" + (x.anulado_en ? ' class="apagado"' : "") + "><td><strong>" + esc(x.numero) + "</strong></td>" +
             '<td class="num">' + (varios ? esc(momento(x.ocurrio_en)) : hora(x.ocurrio_en)) +
               (x.recibido_en && Date.parse(x.recibido_en) - Date.parse(x.ocurrio_en) > 10 * 60000 ? '<span class="menor">llegó ' + esc(momento(x.recibido_en)) + "</span>" : "") + "</td>" +
-            '<td><a class="bus-num" href="#/bus/' + encodeURIComponent(x.interno) + "/" + esc(x.dia) + '">' + esc(x.interno) + "</a></td>" +
+            '<td><a class="bus-num" href="#/bus/' + encodeURIComponent(x.interno) + "/" + esc(x.dia) + '">' + esc(x.interno) + "</a>" +
+              '<span class="menor">' + (x.viaje ? "viaje " + esc(x.viaje) : x.clave_viaje ? "sin despacho" : "sin viaje") + "</span></td>" +
             "<td><strong>" + esc(NOV_TIPOS[x.tipo] || x.tipo) + "</strong>" +
               (queDeNovedad(x) ? '<span class="menor nov-que">' + esc(queDeNovedad(x)) + "</span>" : "") +
               (x.tipo === "trasbordo" && x.nota ? '<span class="menor nov-que">' + esc(x.nota) + "</span>" : "") + "</td>" +
@@ -1795,7 +1841,8 @@
   }
 
   function novedadDe(numero) {
-    return (state.nov.lista || []).filter(function (x) { return String(x.numero) === String(numero); })[0] || null;
+    return (state.nov.lista || []).concat(state.bus.novedades || [])
+      .filter(function (x) { return String(x.numero) === String(numero); })[0] || null;
   }
 
   async function verVideoNovedad(numero) {
@@ -1845,7 +1892,7 @@
             cerrarHoja();
             aviso("Novedad N° " + x.numero + " anulada.");
             state.mov.filas = null;              // la movilidad se vuelve a traer al abrirla
-            cargarNovedades();
+            if (state.vista === "bus") cargarBus(); else cargarNovedades();
           } catch (err) {
             $("anularNovError").textContent = textoError(err);
             $("anularNovError").hidden = false;
@@ -3187,6 +3234,7 @@
       "Tiquetes": f.tiquetes_escaneados == null ? "" : n(f.tiquetes_escaneados),
       "Control": f.control || "",
       "Observaciones": [f.observaciones, f.personal_detalle ? "Personal de la empresa (no se cobra): " + f.personal_detalle : ""]
+        .concat(novedadesDelViaje(f.clave).map(function (x) { return "Novedad " + textoNovedadCorta(x); }))
         .filter(Boolean).join(" · "),
       "Personal de la empresa (no se cobra)": n(f.personal),
       "Corregido": [f.lectura_corregida && "cívica", f.pasajeros_conductor_corregidos && "pasajeros", f.tiquetes_corregidos && "tiquetes"].filter(Boolean).join(", "),

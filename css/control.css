@@ -434,3 +434,5 @@ td.mov-ajustes .btn-chico { min-height: 26px; padding: 0 8px; }
 .tabla-novedades .btn-chico { min-height: 28px; padding: 0 10px; }
 .video-novedad { display: block; width: 100%; max-height: 70vh; margin: 0 auto 10px; border-radius: 12px; background: #000; }
 .sub-hoja { margin: 14px 0 4px; font-size: 15px; }
+.nov-obs { color: #8a5a00; font-weight: 600; }
+.nov-obs.nov-anulada { color: var(--muted); text-decoration: line-through; font-weight: 500; }
