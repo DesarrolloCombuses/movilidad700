@@ -1881,7 +1881,8 @@
   //   Descuento>20      = 0: sin tope
   //   Ajustes           = los que escriben aquí los despachadores (taller, despachador...) + los gestores con código
   //                       + lo que control corrigió en un viaje + los trasbordos que reportó el conductor del bus que
-  //                       recibió los pasajeros (conductor_novedades, sql v11; desde el 16-oct-2026)
+  //                       recibió los pasajeros (conductor_novedades, sql v11; desde el 16-oct-2026) + el personal de
+  //                       la empresa que leyó el código del bus en cada viaje (sql v10; lo pidió el usuario el 16-oct-2026)
   //   Ingresos totales  = Sonar - Descuento>20 - Pasajeros metro - 2 x Viajes realizados - Ajustes
   //   Viajes realizados = los viajes con despacho (los sin despacho suman en Sonar, pero no restan)
   //   Pasajeros metro   = los usos del Mifare de ese bus (Cargar Metro: la plantilla metro o los archivos, más abajo)
@@ -1978,7 +1979,7 @@
       var res = await Promise.all([
         traerTodo(function () {
           return rango(client.from("v_tarjeta_viajes").select("dia,interno,clave,sin_despacho,pasajeros,pasajeros_sensor,subidas,recortados," +
-            "estado_calculo" + (state.v8 ? ",gestores" : ""))).order("dia").order("interno").order("clave");
+            "estado_calculo" + (state.v8 ? ",gestores" : "") + (state.v10 ? ",viaje,personal,personal_detalle" : ""))).order("dia").order("interno").order("clave");
         }),
         traerTodo(function () { return rango(client.from("tarjeta_viajes").select("clave,bajadas")).order("clave"); }),
         estados,
@@ -2044,7 +2045,7 @@
       return filas[k] || (filas[k] = {
         dia: dia, interno: interno, base: baseEn(d.porBus, interno, dia), viajes: 0, sd: 0, subidas: 0, bajadas: 0,
         recortados: 0, gestores: 0, pasajeros: 0, correccion: 0, enCurso: 0, sinViaje: null, fueraRuta: null,
-        trasbordos: [], trasbordo: 0,
+        trasbordos: [], trasbordo: 0, personal: 0, personalViajes: [],
         salenSinViaje: null, salenFueraRuta: null,
         ajustes: [], manual: 0, metro: null, civica: null, estado: null, aviso: "", obs: "",
       });
@@ -2068,6 +2069,11 @@
       r.bajadas += bajadas[v.clave] || 0;
       r.recortados += n(v.recortados);
       r.gestores += n(v.gestores);
+      // El personal de la empresa que se registró en el viaje: el sensor lo contó y no es pasajero.
+      if (n(v.personal)) {
+        r.personal += n(v.personal);
+        r.personalViajes.push({ viaje: v.viaje, sinDespacho: v.sin_despacho, cuantos: n(v.personal), detalle: v.personal_detalle || "" });
+      }
       r.pasajeros += n(v.pasajeros);
       r.correccion += n(v.pasajeros_sensor) - n(v.pasajeros);   // control corrigió el conteo de un viaje
       if (v.estado_calculo === "en_curso") r.enCurso++;
@@ -2104,7 +2110,7 @@
     r.salenFuera = r.salenSinViaje == null && r.salenFueraRuta == null ? null : n(r.salenSinViaje) + n(r.salenFueraRuta);
     r.sonar = r.subidas + n(r.sinRuta);
     r.descuento = 0;                                  // Descuento>20 en cero: sin tope (15-oct-2026)
-    r.ajuste = r.manual + r.gestores + r.correccion + r.trasbordo;
+    r.ajuste = r.manual + r.gestores + r.correccion + r.trasbordo + r.personal;
     // Viajes realizados: solo los que tienen despacho. Los sin despacho Sonar los pone como "sin ruta": su gente
     // suma en Sonar, pero no restan (así coincide con la movilidad hecha con 700control, 15-oct-2026).
     r.viajesReal = r.viajes - r.sd;
@@ -2124,6 +2130,7 @@
     r.trasbordos.forEach(function (x) {
       if (!x.anulado_en) partes.push("Trasbordo " + x.cantidad + " del " + x.interno_origen + " (N° " + x.numero + ")");
     });
+    if (r.personal) partes.push("Personal de la empresa (" + r.personal + ")");
     if (r.gestores) partes.push(r.gestores === 1 ? "Gestor" : "Gestores");
     if (r.correccion) partes.push("Corrección de control");
     if (!r.viajes) partes.push("No laboró");
@@ -2137,12 +2144,12 @@
     var dias = {};
     filas.forEach(function (r) {
       var d = dias[r.dia] || (dias[r.dia] = { dia: r.dia, filas: [], buses: 0, trabajaron: 0, viajes: 0, viajesReal: 0, sd: 0, sonar: 0,
-        sinRuta: null, salenFuera: null, descuento: 0, ajuste: 0, gestores: 0, trasbordo: 0, ingresos: 0, salidasP1: 0, salidas: 0, dif: 0,
+        sinRuta: null, salenFuera: null, descuento: 0, ajuste: 0, gestores: 0, trasbordo: 0, personal: 0, ingresos: 0, salidasP1: 0, salidas: 0, dif: 0,
         metro: null, enCurso: 0 });
       d.filas.push(r);
       d.buses++;
       if (r.viajes) d.trabajaron++;
-      ["viajes", "viajesReal", "sd", "sonar", "descuento", "ajuste", "gestores", "trasbordo", "ingresos", "salidasP1", "salidas", "dif", "enCurso"].forEach(function (c) { d[c] += r[c]; });
+      ["viajes", "viajesReal", "sd", "sonar", "descuento", "ajuste", "gestores", "trasbordo", "personal", "ingresos", "salidasP1", "salidas", "dif", "enCurso"].forEach(function (c) { d[c] += r[c]; });
       if (r.sinRuta != null) d.sinRuta = n(d.sinRuta) + r.sinRuta;
       if (r.salenFuera != null) d.salenFuera = n(d.salenFuera) + r.salenFuera;
       if (r.metro != null) d.metro = n(d.metro) + r.metro;
@@ -2418,7 +2425,8 @@
           " sin despacho no restan</small></div>" +
         '<div class="total"><span>Sonar</span><strong>' + numMov(t.sonar) + "</strong><small>Sin ruta: " + numMov(t.sinRuta) + "</small></div>" +
         '<div class="total"><span>Ajustes</span><strong>' + numMov(t.ajuste) + "</strong><small>" +
-          ([t.trasbordo ? numMov(t.trasbordo) + " de trasbordos" : "", t.gestores ? numMov(t.gestores) + " de gestores con código" : ""]
+          ([t.trasbordo ? numMov(t.trasbordo) + " de trasbordos" : "", t.personal ? numMov(t.personal) + " del personal de la empresa" : "",
+            t.gestores ? numMov(t.gestores) + " de gestores con código" : ""]
             .filter(Boolean).join(" · ") || "escritos por los despachadores") + "</small></div>" +
         '<div class="total" data-tono="bien"><span>Ingresos totales</span><strong>' + numMov(t.ingresos) + "</strong><small>Total salidas " +
           numMov(t.salidas) + " · Dif " + numMov(t.dif) + "</small></div>" +
@@ -2488,7 +2496,7 @@
       var c = celdasMov(r);
       MOV_TITULOS.forEach(function (t, i) { if (MOV_NUMEROS.indexOf(t) >= 0 && t !== "Año" && c[i] != null) suma[t] = n(suma[t]) + c[i]; });
       var vigentes = r.ajustes.filter(function (a) { return !a.anulado_en; });
-      var boton = puede || r.ajustes.length || r.trasbordos.length
+      var boton = puede || r.ajustes.length || r.trasbordos.length || r.personal
         ? ' <button class="btn btn-chico" type="button" data-mov-ajuste="' + esc(r.interno) + '" data-mov-ajuste-dia="' + esc(r.dia) + '">' +
           (puede ? (vigentes.length ? "Cambiar" : "+ Ajuste") : "Ver") + "</button>" : "";
       html += "<tr" + (r.viajes ? "" : ' class="apagado"') + ">" + MOV_TITULOS.map(function (t, i) {
@@ -2845,13 +2853,19 @@
         (a.nota ? " · " + esc(a.nota) : "") + '<span class="menor">' + esc(a.escrita_por_correo || "") + " · " + esc(momento(a.escrita_en)) + "</span>" +
         (a.anulado_en ? '<span class="menor">Anulado por ' + esc(a.anulado_por_correo || "") + " el " + esc(momento(a.anulado_en)) + ": " + esc(a.anulado_motivo || "") + "</span>"
           : puede ? '<button class="btn btn-chico" type="button" data-mov-anular="' + esc(a.id) + '">Anular</button>' : "") + "</li>";
-    }).join("") + "</ul>" : '<p class="nota">' + (r.trasbordos.length ? "No tiene ajustes escritos por los despachadores." : "Este bus no tiene ajustes este día.") + "</p>";
+    }).join("") + "</ul>" : '<p class="nota">' + (r.trasbordos.length || r.personal ? "No tiene ajustes escritos por los despachadores." : "Este bus no tiene ajustes este día.") + "</p>";
     if (r.trasbordos.length) {
       lista += '<h3 class="sub-hoja">Trasbordos que reportó el conductor</h3><ul class="lista-ajustes">' + r.trasbordos.map(function (x) {
         return "<li" + (x.anulado_en ? ' class="anulado"' : "") + "><strong>" + x.cantidad + " · Trasbordo del " + esc(x.interno_origen) + "</strong>" +
           " · novedad N° " + esc(x.numero) + '<span class="menor">' + esc(capitalizar(x.nombre_conductor || "")) + " · " + esc(momento(x.ocurrio_en)) + "</span>" +
           (x.anulado_en ? '<span class="menor">Anulado por ' + esc(x.anulado_por_correo || "") + " el " + esc(momento(x.anulado_en)) + ": " + esc(x.anulado_motivo || "") + "</span>"
             : '<a class="btn btn-chico" href="#/novedades/' + esc(x.dia) + "/" + esc(x.dia) + '" data-cerrar-hoja>Ver la novedad</a>') + "</li>";
+      }).join("") + "</ul>";
+    }
+    if (r.personal) {
+      lista += '<h3 class="sub-hoja">Personal de la empresa que leyó el código del bus</h3><ul class="lista-ajustes">' + r.personalViajes.map(function (x) {
+        return "<li><strong>" + x.cuantos + " · " + (x.sinDespacho ? "Viaje sin despacho" : "Viaje " + esc(x.viaje)) + "</strong>" +
+          '<span class="menor">' + esc(x.detalle) + "</span></li>";
       }).join("") + "</ul>";
     }
     abrirHoja("Ajustes del " + interno + " · " + fechaCorta(dia),
@@ -3100,7 +3114,8 @@
       var A = hojaVaV(libro, "Ajustes", ["Día", "Bus", "Cantidad", "Motivo", "Nota", "Escribió", "Cuándo", "Anulado"]);
       var ajustes = m.datos.ajustes || [];
       var trasbordos = m.datos.novedades || [];
-      if (!ajustes.length && !trasbordos.length) A.poner(["Ninguno entre esas fechas"]);
+      var conPersonal = (m.filas || []).filter(function (r) { return r.personal; });
+      if (!ajustes.length && !trasbordos.length && !conPersonal.length) A.poner(["Ninguno entre esas fechas"]);
       ajustes.forEach(function (a) {
         A.poner([a.dia, a.interno, a.cantidad, a.motivo, a.nota || "", a.escrita_por_correo || "", momento(a.escrita_en),
           a.anulado_en ? (a.anulado_motivo || "") + " (" + (a.anulado_por_correo || "") + ", " + momento(a.anulado_en) + ")" : ""]);
@@ -3109,6 +3124,12 @@
         A.poner([x.dia, x.interno, x.cantidad, "Trasbordo", "Del " + x.interno_origen + " · novedad N° " + x.numero,
           capitalizar(x.nombre_conductor || "") + " (conductor)", momento(x.ocurrio_en),
           x.anulado_en ? (x.anulado_motivo || "") + " (" + (x.anulado_por_correo || "") + ", " + momento(x.anulado_en) + ")" : ""]);
+      });
+      conPersonal.forEach(function (r) {
+        r.personalViajes.forEach(function (x) {
+          A.poner([r.dia, r.interno, x.cuantos, "Personal de la empresa", (x.sinDespacho ? "Viaje sin despacho" : "Viaje " + x.viaje) + ": " + x.detalle,
+            "Leyó el código del bus", "", ""]);
+        });
       });
       A.cerrar();
       var N = libro.addWorksheet("Notas");
@@ -3123,7 +3144,7 @@
         "Sin ruta: lo que entró fuera del viaje a viaje (en la ruta sin viaje, y en el patio o el taller). Ya va dentro de Sonar y de los ingresos: la columna solo lo muestra.",
         "Salidas P1: lo que contó bajando en los viajes más lo que bajó fuera de ellos. Salidas P2 va en 0: el sensor no separa las puertas.",
         "Descuento>20 va en 0: sin tope por viaje.",
-        "Ajustes: los que escribieron los despachadores en Control (taller, administrativo, despachador...), más los gestores que subieron con su código, lo que control corrigió en un viaje y los trasbordos que reportó el conductor del bus que recibió los pasajeros (novedades de la app). La hoja Ajustes los trae uno por uno.",
+        "Ajustes: los que escribieron los despachadores en Control (taller, administrativo, despachador...), más los gestores que subieron con su código, lo que control corrigió en un viaje, los trasbordos que reportó el conductor del bus que recibió los pasajeros (novedades de la app) y el personal de la empresa que leyó el código del bus (gestoras, auxiliares...). La hoja Ajustes los trae uno por uno.",
         "Viajes realizados: los viajes con despacho; cada uno resta 2. Los sin despacho Sonar los pone como \"sin ruta\": su gente suma en Sonar, pero no restan.",
         "Pasajeros metro: los usos de la tarjeta Mifare (cívica) de ese bus, de la plantilla metro (fecha, vehiculo, total) o de los archivos de la liquidación. Cada archivo del Mifare va al día de su nombre, como en la plantilla (el \"01-10\" es el 1 de octubre), y la placa se pasa a bus con las placas de Sonar. Se restan de los ingresos y de las salidas; si el día no tiene Metro cargado, va vacío y no resta.",
         "El bus va como texto y con un espacio al final (\"703 \"), menos el 710 y el 756, igual que en Movilidad 2026.",

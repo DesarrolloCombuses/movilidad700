@@ -60,6 +60,7 @@ Desde el 16-oct-2026 el personal de la empresa (gestoras, auxiliares, mecánicos
 
 - **En la tarjeta del bus:** el viaje dice *"incluye 1 del personal (no se cobra)"* y en observaciones *"Personal: María Gómez (Gestor De Movilidad) 10:42"*. Al abrir el viaje sale la persona con su selfie, la hora y dónde estaba.
 - **En el Excel de la tarjeta:** la columna *Personal de la empresa (no se cobra)* y quién fue en Observaciones.
+- **En la movilidad** (v0.11.1, lo pidió el usuario el 16-oct): va a los **Ajustes** del bus ese día, como el trasbordo. En Observaciones sale *"Personal de la empresa (2)"*, la hoja de ajustes del bus dice en qué viaje y quién, y la hoja *Ajustes* del Excel lo trae viaje por viaje.
 - Lo de aprobar celulares (lo de abajo, v0.6.0) se quitó: la huella ya no se usa.
 
 ### Las novedades del conductor (v0.11.0, novedades.sql: la versión 11)
