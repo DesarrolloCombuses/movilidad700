@@ -85,6 +85,8 @@
       error: null, cargando: false, progreso: 0, orden: null },
     // Personal de la empresa (sql v10): quién leyó el código del bus, en qué viaje (la pestaña Personal)
     ges: { fecha: null, registros: null, fotos: {}, error: null, cargando: false },
+    // Novedades del conductor (sql v11): trasbordo, varado, accidente u otra, con su video
+    nov: { desde: null, hasta: null, lista: null, error: null, cargando: false, hay: true, tipo: "", limpiado: false },
     // Movilidad: la Base de datos de Movilidad 2026 (movilidad.sql: ajustes y archivos planos)
     mov: { desde: null, hasta: null, datos: null, filas: null, error: null, cargando: false, resumenAbierto: false,
       noRealizados: null, noRealizadosError: null, noRealizadosPromesa: null, noRealizadosAbierto: true,
@@ -383,7 +385,7 @@
   function enrutar() {
     if (!state.user) return;
     var partes = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
-    var vista = ["dia", "bus", "informes", "movilidad", "gestores"].indexOf(partes[0]) >= 0 ? partes[0] : "dia";
+    var vista = ["dia", "bus", "informes", "movilidad", "gestores", "novedades"].indexOf(partes[0]) >= 0 ? partes[0] : "dia";
     mostrarVista(vista);
     if (vista === "dia") {
       abrirDia(esFecha(partes[1]) ? partes[1] : state.dia.fecha || diaDeHoy());
@@ -391,6 +393,10 @@
       abrirBus(partes[1] || state.bus.interno, esFecha(partes[2]) ? partes[2] : state.bus.fecha || state.dia.fecha || diaDeHoy());
     } else if (vista === "gestores") {
       abrirGestores(esFecha(partes[1]) ? partes[1] : state.ges.fecha || state.dia.fecha || diaDeHoy());
+    } else if (vista === "novedades") {
+      // Sin fechas: las de hoy.
+      var hastaNov = esFecha(partes[2]) ? partes[2] : state.nov.hasta || diaDeHoy();
+      abrirNovedades(esFecha(partes[1]) ? partes[1] : state.nov.desde || hastaNov, hastaNov);
     } else if (vista === "movilidad") {
       // Sin fechas: del primero del mes hasta ayer (los días ya cerrados).
       var hasta = esFecha(partes[2]) ? partes[2] : state.mov.hasta || sumarDias(diaDeHoy(), -1);
@@ -407,6 +413,7 @@
     $("vistaInformes").hidden = vista !== "informes";
     $("vistaGestores").hidden = vista !== "gestores";
     $("vistaMovilidad").hidden = vista !== "movilidad";
+    $("vistaNovedades").hidden = vista !== "novedades";
     Array.prototype.forEach.call(document.querySelectorAll("[data-pestana]"), function (a) {
       if (a.getAttribute("data-pestana") === vista) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
@@ -421,6 +428,7 @@
     if (state.dia.fecha) dia.href = "#/dia/" + state.dia.fecha;
     if (state.bus.interno) bus.href = "#/bus/" + encodeURIComponent(state.bus.interno) + "/" + state.bus.fecha;
     if (state.ges.fecha) document.querySelector('[data-pestana="gestores"]').href = "#/gestores/" + state.ges.fecha;
+    if (state.nov.desde) document.querySelector('[data-pestana="novedades"]').href = "#/novedades/" + state.nov.desde + "/" + state.nov.hasta;
     if (state.mov.desde) document.querySelector('[data-pestana="movilidad"]').href = "#/movilidad/" + state.mov.desde + "/" + state.mov.hasta;
   }
 
@@ -1669,6 +1677,200 @@
     cuerpo.innerHTML = html;
   }
 
+  // ================================================================ novedades del conductor (sql v11)
+  // El conductor las reporta desde su app: trasbordo, bus varado o daño, accidente o incidente, u otra. Cada una
+  // tiene su número y puede traer un video de máximo 1 minuto, que se guarda 90 días. El trasbordo lo reporta el
+  // bus que RECIBE los pasajeros y va de una vez a los Ajustes de su movilidad; un despachador lo puede anular aquí.
+  // La hoja (conductor_novedades) la ve cualquiera con sesión; el video, solo los despachadores.
+  var NOV_TIPOS = { trasbordo: "Trasbordo", varado: "Bus varado o daño", accidente: "Accidente o incidente", otra: "Otra novedad" };
+  var CAMPOS_NOVEDAD = "numero,tipo,dia,interno,interno_origen,cantidad,nota,dni_conductor,nombre_conductor,ocurrio_en," +
+    "recibido_en,lat,lon,precision_m,video_ruta,video_bytes,video_segundos,video_borrado_en,anulado_por_correo,anulado_en,anulado_motivo";
+  var CAMPOS_NOVEDAD_MOV = "numero,dia,interno,interno_origen,cantidad,nombre_conductor,ocurrio_en,anulado_en,anulado_motivo,anulado_por_correo";
+
+  function abrirNovedades(desde, hasta) {
+    var v = state.nov;
+    var cambio = v.desde !== desde || v.hasta !== hasta;
+    v.desde = desde;
+    v.hasta = hasta;
+    $("novDesde").value = desde;
+    $("novHasta").value = hasta;
+    actualizarPestanas();
+    if (cambio || (!v.lista && !v.cargando)) {
+      v.lista = null;
+      v.error = null;
+      pintarNovedades();
+      cargarNovedades();
+    } else {
+      pintarNovedades();
+    }
+  }
+
+  async function cargarNovedades() {
+    var v = state.nov, desde = v.desde, hasta = v.hasta;
+    if (!esFecha(desde) || !esFecha(hasta) || desde > hasta) { pintarNovedades(); return; }
+    v.cargando = true;
+    try {
+      var lista = await traerTodo(function () {
+        return client.from("conductor_novedades").select(CAMPOS_NOVEDAD).gte("dia", desde).lte("dia", hasta).order("numero", { ascending: false });
+      });
+      if (v.desde !== desde || v.hasta !== hasta) return;
+      v.lista = lista;
+      v.hay = true;
+      v.error = null;
+    } catch (err) {
+      if (v.desde !== desde || v.hasta !== hasta) return;
+      if (faltaTabla(err)) { v.hay = false; v.lista = []; v.error = null; }
+      else v.error = err;
+    } finally {
+      v.cargando = false;
+      if (state.vista === "novedades" && v.desde === desde && v.hasta === hasta) pintarNovedades();
+    }
+    limpiarVideosVencidos();
+  }
+
+  function queDeNovedad(x) {
+    return x.tipo === "trasbordo" ? x.cantidad + (x.cantidad === 1 ? " pasajero" : " pasajeros") + " del " + x.interno_origen
+      : x.nota || "";
+  }
+
+  function pintarNovedades() {
+    var v = state.nov, cuerpo = $("novCuerpo");
+    $("novTipo").value = v.tipo;
+    var malo = !esFecha(v.desde) || !esFecha(v.hasta) ? "Escoja las dos fechas." : v.desde > v.hasta ? "La fecha de inicio va antes que la final." : "";
+    $("novSub").textContent = malo ? "Las que reportan los conductores desde su app, con su número y su video." :
+      (v.desde === v.hasta ? fechaLarga(v.desde) : "Del " + fechaCorta(v.desde) + " al " + fechaCorta(v.hasta)) + " (" + textoCorte() + "). " +
+      "El trasbordo lo reporta el bus que recibe los pasajeros y va de una vez a los Ajustes de su movilidad.";
+    if (malo) { cuerpo.innerHTML = '<p class="vacio">' + esc(malo) + "</p>"; return; }
+    if (!v.hay) { cuerpo.innerHTML = '<p class="caja-error">Falta correr novedades.sql (la versión 11) en Supabase.</p>'; return; }
+    if (!v.lista) {
+      cuerpo.innerHTML = v.error ? cajaError("No se pudieron traer las novedades: " + textoError(v.error), "recargar-novedades")
+        : '<p class="cargando">Trayendo las novedades…</p>';
+      return;
+    }
+    var todas = v.lista;
+    var lista = v.tipo ? todas.filter(function (x) { return x.tipo === v.tipo; }) : todas;
+    var tras = todas.filter(function (x) { return x.tipo === "trasbordo" && !x.anulado_en; });
+    var pasajeros = tras.reduce(function (s, x) { return s + n(x.cantidad); }, 0);
+    var anuladas = todas.filter(function (x) { return x.anulado_en; }).length;
+    var conVideo = todas.filter(function (x) { return x.video_ruta && !x.video_borrado_en; }).length;
+    function caja(titulo, grande, chico, tono) {
+      return '<div class="total"' + (tono ? ' data-tono="' + tono + '"' : "") + "><span>" + titulo + "</span><strong>" + grande + "</strong>" +
+        (chico ? "<small>" + chico + "</small>" : "") + "</div>";
+    }
+    var html = '<div class="totales">' +
+      caja("Novedades", todas.length, "reportadas por los conductores") +
+      caja("Trasbordos", tras.length, miles(pasajeros) + " pasajeros a los Ajustes de la movilidad", tras.length ? "bien" : "") +
+      caja("Con video", conVideo, "se guardan 90 días") +
+      caja("Anuladas", anuladas, anuladas ? "por un despachador" : "ninguna", anuladas ? "revisa" : "") +
+      "</div>";
+    if (!state.revisor) html += '<p class="nota">Los videos y el botón para anular solo los tienen los despachadores (tarjeta_revisores).</p>';
+    var varios = v.desde !== v.hasta;
+    if (!lista.length) {
+      html += '<p class="vacio">' + (todas.length ? "Ninguna de ese tipo." : "Ningún conductor reportó novedades en esas fechas.") + "</p>";
+    } else {
+      html += '<div class="tabla-caja"><table class="tabla-novedades"><thead><tr><th>N°</th><th>' + (varios ? "Cuándo" : "Hora") + "</th><th>Bus</th>" +
+        "<th>Qué pasó</th><th>Conductor</th><th>Dónde</th><th>Video</th><th>Estado</th></tr></thead><tbody>" +
+        lista.map(function (x) {
+          var video = !x.video_ruta ? '<span class="menor">Sin video</span>'
+            : x.video_borrado_en ? '<span class="menor">Borrado a los 90 días</span>'
+            : state.revisor ? '<button class="btn btn-chico" type="button" data-nov-video="' + esc(x.numero) + '">▶ Ver video</button>' +
+              (x.video_segundos ? '<span class="menor">' + esc(String(Math.round(x.video_segundos))) + " s</span>" : "")
+            : chip("info", "Con video");
+          var estado = x.anulado_en
+            ? chip("mal", "Anulada") + '<span class="menor">' + esc(x.anulado_motivo || "") + " · " + esc(x.anulado_por_correo || "") + " · " + esc(momento(x.anulado_en)) + "</span>"
+            : (x.tipo === "trasbordo" ? chip("ok", "Resta " + x.cantidad) : chip("", "Registrada")) +
+              (state.revisor ? ' <button class="btn btn-chico" type="button" data-nov-anular="' + esc(x.numero) + '">Anular</button>' : "");
+          return "<tr" + (x.anulado_en ? ' class="apagado"' : "") + "><td><strong>" + esc(x.numero) + "</strong></td>" +
+            '<td class="num">' + (varios ? esc(momento(x.ocurrio_en)) : hora(x.ocurrio_en)) +
+              (x.recibido_en && Date.parse(x.recibido_en) - Date.parse(x.ocurrio_en) > 10 * 60000 ? '<span class="menor">llegó ' + esc(momento(x.recibido_en)) + "</span>" : "") + "</td>" +
+            '<td><a class="bus-num" href="#/bus/' + encodeURIComponent(x.interno) + "/" + esc(x.dia) + '">' + esc(x.interno) + "</a></td>" +
+            "<td><strong>" + esc(NOV_TIPOS[x.tipo] || x.tipo) + "</strong>" +
+              (queDeNovedad(x) ? '<span class="menor nov-que">' + esc(queDeNovedad(x)) + "</span>" : "") +
+              (x.tipo === "trasbordo" && x.nota ? '<span class="menor nov-que">' + esc(x.nota) + "</span>" : "") + "</td>" +
+            "<td>" + esc(capitalizar(x.nombre_conductor || "")) + '<span class="menor">' + esc(x.dni_conductor || "") + "</span></td>" +
+            "<td>" + lugarDe(x) + "</td><td>" + video + "</td><td>" + estado + "</td></tr>";
+        }).join("") + "</tbody></table></div>";
+    }
+    cuerpo.innerHTML = html;
+  }
+
+  function novedadDe(numero) {
+    return (state.nov.lista || []).filter(function (x) { return String(x.numero) === String(numero); })[0] || null;
+  }
+
+  async function verVideoNovedad(numero) {
+    var x = novedadDe(numero);
+    if (!x || !x.video_ruta) return;
+    abrirHoja("Novedad N° " + x.numero + " · " + (NOV_TIPOS[x.tipo] || x.tipo), '<p class="cargando">Trayendo el video…</p>');
+    try {
+      var res = await conTiempo(client.storage.from("conductor-novedades").createSignedUrl(x.video_ruta, 3600), 20000);
+      if (res.error) throw res.error;
+      var url = res.data && res.data.signedUrl;
+      if ($("hoja").hidden || $("hojaTitulo").textContent.indexOf("N° " + x.numero + " ") < 0) return;
+      $("hojaCuerpo").innerHTML = '<video class="video-novedad" controls autoplay playsinline src="' + esc(url) + '"></video>' +
+        '<p class="nota"><strong>Bus ' + esc(x.interno) + "</strong> · " + esc(momento(x.ocurrio_en)) + " · " + esc(capitalizar(x.nombre_conductor || "")) +
+        (queDeNovedad(x) ? " · " + esc(queDeNovedad(x)) : "") + "</p>" +
+        '<p class="nota"><a href="' + esc(url) + '" target="_blank" rel="noopener" download>Descargar el video</a> · el enlace sirve 1 hora. ' +
+        "El video se borra solo a los 90 días de subido.</p>";
+    } catch (err) {
+      $("hojaCuerpo").innerHTML = cajaError("No se pudo traer el video: " + textoError(err));
+    }
+  }
+
+  function abrirAnularNovedad(numero) {
+    var x = novedadDe(numero);
+    if (!x) return;
+    abrirHoja("Anular la novedad N° " + x.numero,
+      "<p><strong>" + esc(NOV_TIPOS[x.tipo] || x.tipo) + "</strong> en el " + esc(x.interno) + " · " + esc(momento(x.ocurrio_en)) +
+        (queDeNovedad(x) ? " · " + esc(queDeNovedad(x)) : "") + "</p>" +
+      '<p class="nota">La novedad no se borra: queda anulada, con quién, cuándo y por qué.' +
+        (x.tipo === "trasbordo" ? " Sus " + x.cantidad + " pasajeros dejan de restarse en la movilidad del " + esc(x.interno) + "." : "") + "</p>" +
+      '<form id="formAnularNovedad" novalidate><label class="campo"><span>Por qué</span><textarea id="anularNovMotivo" maxlength="300"></textarea></label>' +
+      '<p id="anularNovError" class="error" hidden></p>' +
+      '<div class="acciones"><button class="btn btn-peligro" type="submit" id="anularNovGuardar">Anular</button>' +
+      '<button class="btn" type="button" data-cerrar-hoja>Cancelar</button></div></form>',
+      function (caja) {
+        caja.querySelector("#formAnularNovedad").addEventListener("submit", async function (ev) {
+          ev.preventDefault();
+          var motivo = $("anularNovMotivo").value.trim();
+          if (!motivo) {
+            $("anularNovError").textContent = "Escriba por qué.";
+            $("anularNovError").hidden = false;
+            return;
+          }
+          $("anularNovGuardar").disabled = true;
+          try {
+            var res = await conTiempo(client.rpc("conductor_novedad_anular", { p_numero: x.numero, p_motivo: motivo }));
+            if (res.error) throw res.error;
+            cerrarHoja();
+            aviso("Novedad N° " + x.numero + " anulada.");
+            state.mov.filas = null;              // la movilidad se vuelve a traer al abrirla
+            cargarNovedades();
+          } catch (err) {
+            $("anularNovError").textContent = textoError(err);
+            $("anularNovError").hidden = false;
+            $("anularNovGuardar").disabled = false;
+          }
+        });
+      });
+  }
+
+  // A los 90 días el video se borra: lo hace Control cuando entra un despachador (una vez por sesión).
+  async function limpiarVideosVencidos() {
+    if (!state.revisor || state.nov.limpiado) return;
+    state.nov.limpiado = true;
+    try {
+      var res = await conTiempo(client.rpc("conductor_novedades_videos_vencidos"), 20000);
+      if (res.error) return;
+      for (var i = 0; i < (res.data || []).length; i++) {
+        var x = res.data[i];
+        var b = await conTiempo(client.storage.from("conductor-novedades").remove([x.video_ruta]), 20000);
+        if (b.error) continue;
+        await conTiempo(client.rpc("conductor_novedad_video_borrado", { p_numero: x.numero }), 20000);
+      }
+    } catch (_) { /* se intenta la próxima vez */ }
+  }
+
   // ================================================================ MOVILIDAD: la "Base de datos" de Movilidad 2026
   // Un renglón por bus y día con las mismas 25 columnas del Excel de movilidad, como lo sacaba la plantilla
   // 700control (github DesarrolloCombuses/700control) con el archivo de Sonar. Sale de lo que publica el programa
@@ -1678,7 +1880,8 @@
   //                       Ya va dentro de Sonar y de los ingresos: la columna solo lo muestra
   //   Descuento>20      = 0: sin tope
   //   Ajustes           = los que escriben aquí los despachadores (taller, despachador...) + los gestores con código
-  //                       + lo que control corrigió en un viaje
+  //                       + lo que control corrigió en un viaje + los trasbordos que reportó el conductor del bus que
+  //                       recibió los pasajeros (conductor_novedades, sql v11; desde el 16-oct-2026)
   //   Ingresos totales  = Sonar - Descuento>20 - Pasajeros metro - 2 x Viajes realizados - Ajustes
   //   Viajes realizados = los viajes con despacho (los sin despacho suman en Sonar, pero no restan)
   //   Pasajeros metro   = los usos del Mifare de ese bus (Cargar Metro: la plantilla metro o los archivos, más abajo)
@@ -1746,7 +1949,7 @@
     $("movExcel").disabled = true;
     function sigue() { return m.desde === desde && m.hasta === hasta; }
     try {
-      var entradas = true, salidas = true, tablas = true;
+      var entradas = true, salidas = true, tablas = true, novError = null;
       function rango(q) { return q.gte("dia", desde).lte("dia", hasta); }
       function deBuses(campos) {
         return traerTodo(function () { return rango(client.from("tarjeta_buses_dia").select(campos)).order("dia").order("interno"); });
@@ -1784,9 +1987,15 @@
         deMovilidad("movilidad_externos", "dia,interno,fuente,cantidad,archivo,cargado_por_correo,cargado_en", ["dia", "interno", "fuente"]),
         traerTodo(function () { return rango(client.from("tarjeta_dia_manual").select("dia,interno,observaciones")).order("dia").order("interno"); })
           .catch(function () { return []; }),
+        // Los trasbordos de las novedades del conductor (conductor_novedades, sql v11). Sin ella, no hay.
+        traerTodo(function () {
+          return rango(client.from("conductor_novedades").select(CAMPOS_NOVEDAD_MOV)).eq("tipo", "trasbordo").order("numero");
+        }).catch(function (err) { if (!faltaTabla(err)) novError = err; return []; }),
       ]);
       if (!sigue()) return;
-      m.datos = { viajes: res[0], bajadas: res[1], estados: res[2], porBus: res[3], ajustes: res[4], externos: res[5], manual: res[6] };
+      m.datos = { viajes: res[0], bajadas: res[1], estados: res[2], porBus: res[3], ajustes: res[4], externos: res[5], manual: res[6],
+        novedades: res[7] };
+      m.novedadesError = novError;
       m.entradas = entradas;
       m.salidas = salidas;
       m.tablas = tablas;
@@ -1835,6 +2044,7 @@
       return filas[k] || (filas[k] = {
         dia: dia, interno: interno, base: baseEn(d.porBus, interno, dia), viajes: 0, sd: 0, subidas: 0, bajadas: 0,
         recortados: 0, gestores: 0, pasajeros: 0, correccion: 0, enCurso: 0, sinViaje: null, fueraRuta: null,
+        trasbordos: [], trasbordo: 0,
         salenSinViaje: null, salenFueraRuta: null,
         ajustes: [], manual: 0, metro: null, civica: null, estado: null, aviso: "", obs: "",
       });
@@ -1867,6 +2077,12 @@
       r.ajustes.push(a);
       if (!a.anulado_en) r.manual += n(a.cantidad);
     });
+    // El trasbordo va al bus que recibió los pasajeros: el sensor los contó otra vez.
+    (d.novedades || []).forEach(function (x) {
+      var r = fila(x.dia, x.interno);
+      r.trasbordos.push(x);
+      if (!x.anulado_en) r.trasbordo += n(x.cantidad);
+    });
     // Con el archivo del Metro cargado para un día, el bus que no sale en él tuvo 0 (como en el Excel), no "—".
     var conMetro = {};
     d.externos.forEach(function (x) {
@@ -1888,7 +2104,7 @@
     r.salenFuera = r.salenSinViaje == null && r.salenFueraRuta == null ? null : n(r.salenSinViaje) + n(r.salenFueraRuta);
     r.sonar = r.subidas + n(r.sinRuta);
     r.descuento = 0;                                  // Descuento>20 en cero: sin tope (15-oct-2026)
-    r.ajuste = r.manual + r.gestores + r.correccion;
+    r.ajuste = r.manual + r.gestores + r.correccion + r.trasbordo;
     // Viajes realizados: solo los que tienen despacho. Los sin despacho Sonar los pone como "sin ruta": su gente
     // suma en Sonar, pero no restan (así coincide con la movilidad hecha con 700control, 15-oct-2026).
     r.viajesReal = r.viajes - r.sd;
@@ -1905,6 +2121,9 @@
       if (motivo === "Otro") suyos.forEach(function (a) { partes.push(a.nota || "Otro"); });
       else partes.push(motivo);
     });
+    r.trasbordos.forEach(function (x) {
+      if (!x.anulado_en) partes.push("Trasbordo " + x.cantidad + " del " + x.interno_origen + " (N° " + x.numero + ")");
+    });
     if (r.gestores) partes.push(r.gestores === 1 ? "Gestor" : "Gestores");
     if (r.correccion) partes.push("Corrección de control");
     if (!r.viajes) partes.push("No laboró");
@@ -1918,12 +2137,12 @@
     var dias = {};
     filas.forEach(function (r) {
       var d = dias[r.dia] || (dias[r.dia] = { dia: r.dia, filas: [], buses: 0, trabajaron: 0, viajes: 0, viajesReal: 0, sd: 0, sonar: 0,
-        sinRuta: null, salenFuera: null, descuento: 0, ajuste: 0, gestores: 0, ingresos: 0, salidasP1: 0, salidas: 0, dif: 0,
+        sinRuta: null, salenFuera: null, descuento: 0, ajuste: 0, gestores: 0, trasbordo: 0, ingresos: 0, salidasP1: 0, salidas: 0, dif: 0,
         metro: null, enCurso: 0 });
       d.filas.push(r);
       d.buses++;
       if (r.viajes) d.trabajaron++;
-      ["viajes", "viajesReal", "sd", "sonar", "descuento", "ajuste", "gestores", "ingresos", "salidasP1", "salidas", "dif", "enCurso"].forEach(function (c) { d[c] += r[c]; });
+      ["viajes", "viajesReal", "sd", "sonar", "descuento", "ajuste", "gestores", "trasbordo", "ingresos", "salidasP1", "salidas", "dif", "enCurso"].forEach(function (c) { d[c] += r[c]; });
       if (r.sinRuta != null) d.sinRuta = n(d.sinRuta) + r.sinRuta;
       if (r.salenFuera != null) d.salenFuera = n(d.salenFuera) + r.salenFuera;
       if (r.metro != null) d.metro = n(d.metro) + r.metro;
@@ -2190,6 +2409,8 @@
       : dias.some(function (d) { return d.salenFuera == null; }) ? "Algunos días no tienen lo que bajó fuera de los viajes: en esos, Salidas P1 sale solo con lo de los viajes y la Dif puede salir alta. Se completan recargando esos días con el programa nuevo."
       : "";
     if (falta) html += '<p class="aviso-programa">' + falta + "</p>";
+    if (m.novedadesError) html += '<p class="aviso-programa">No se pudieron traer los trasbordos de las novedades (' + esc(textoError(m.novedadesError)) +
+      "): los Ajustes salen sin ellos.</p>";
     if (t) {
       html += '<div class="totales">' +
         '<div class="total"><span>Días</span><strong>' + dias.length + "</strong><small>" + miles(t.buses) + " renglones bus-día</small></div>" +
@@ -2197,7 +2418,8 @@
           " sin despacho no restan</small></div>" +
         '<div class="total"><span>Sonar</span><strong>' + numMov(t.sonar) + "</strong><small>Sin ruta: " + numMov(t.sinRuta) + "</small></div>" +
         '<div class="total"><span>Ajustes</span><strong>' + numMov(t.ajuste) + "</strong><small>" +
-          (t.gestores ? numMov(t.gestores) + " de gestores con código" : "escritos por los despachadores") + "</small></div>" +
+          ([t.trasbordo ? numMov(t.trasbordo) + " de trasbordos" : "", t.gestores ? numMov(t.gestores) + " de gestores con código" : ""]
+            .filter(Boolean).join(" · ") || "escritos por los despachadores") + "</small></div>" +
         '<div class="total" data-tono="bien"><span>Ingresos totales</span><strong>' + numMov(t.ingresos) + "</strong><small>Total salidas " +
           numMov(t.salidas) + " · Dif " + numMov(t.dif) + "</small></div>" +
         '<div class="total"><span>Pasajeros metro</span><strong>' + numMov(t.metro) + "</strong><small>" +
@@ -2266,7 +2488,7 @@
       var c = celdasMov(r);
       MOV_TITULOS.forEach(function (t, i) { if (MOV_NUMEROS.indexOf(t) >= 0 && t !== "Año" && c[i] != null) suma[t] = n(suma[t]) + c[i]; });
       var vigentes = r.ajustes.filter(function (a) { return !a.anulado_en; });
-      var boton = puede || r.ajustes.length
+      var boton = puede || r.ajustes.length || r.trasbordos.length
         ? ' <button class="btn btn-chico" type="button" data-mov-ajuste="' + esc(r.interno) + '" data-mov-ajuste-dia="' + esc(r.dia) + '">' +
           (puede ? (vigentes.length ? "Cambiar" : "+ Ajuste") : "Ver") + "</button>" : "";
       html += "<tr" + (r.viajes ? "" : ' class="apagado"') + ">" + MOV_TITULOS.map(function (t, i) {
@@ -2623,7 +2845,15 @@
         (a.nota ? " · " + esc(a.nota) : "") + '<span class="menor">' + esc(a.escrita_por_correo || "") + " · " + esc(momento(a.escrita_en)) + "</span>" +
         (a.anulado_en ? '<span class="menor">Anulado por ' + esc(a.anulado_por_correo || "") + " el " + esc(momento(a.anulado_en)) + ": " + esc(a.anulado_motivo || "") + "</span>"
           : puede ? '<button class="btn btn-chico" type="button" data-mov-anular="' + esc(a.id) + '">Anular</button>' : "") + "</li>";
-    }).join("") + "</ul>" : '<p class="nota">Este bus no tiene ajustes este día.</p>';
+    }).join("") + "</ul>" : '<p class="nota">' + (r.trasbordos.length ? "No tiene ajustes escritos por los despachadores." : "Este bus no tiene ajustes este día.") + "</p>";
+    if (r.trasbordos.length) {
+      lista += '<h3 class="sub-hoja">Trasbordos que reportó el conductor</h3><ul class="lista-ajustes">' + r.trasbordos.map(function (x) {
+        return "<li" + (x.anulado_en ? ' class="anulado"' : "") + "><strong>" + x.cantidad + " · Trasbordo del " + esc(x.interno_origen) + "</strong>" +
+          " · novedad N° " + esc(x.numero) + '<span class="menor">' + esc(capitalizar(x.nombre_conductor || "")) + " · " + esc(momento(x.ocurrio_en)) + "</span>" +
+          (x.anulado_en ? '<span class="menor">Anulado por ' + esc(x.anulado_por_correo || "") + " el " + esc(momento(x.anulado_en)) + ": " + esc(x.anulado_motivo || "") + "</span>"
+            : '<a class="btn btn-chico" href="#/novedades/' + esc(x.dia) + "/" + esc(x.dia) + '" data-cerrar-hoja>Ver la novedad</a>') + "</li>";
+      }).join("") + "</ul>";
+    }
     abrirHoja("Ajustes del " + interno + " · " + fechaCorta(dia),
       '<p class="nota">Personas que el sensor contó y no son pasajeros. Se restan de los ingresos y de las salidas. ' +
         "Ahora: Sonar " + numMov(r.sonar) + " · Ingresos " + numMov(r.ingresos) + (r.gestores ? " · " + r.gestores + " gestor(es) ya restados" : "") + ".</p>" +
@@ -2869,10 +3099,16 @@
       }
       var A = hojaVaV(libro, "Ajustes", ["Día", "Bus", "Cantidad", "Motivo", "Nota", "Escribió", "Cuándo", "Anulado"]);
       var ajustes = m.datos.ajustes || [];
-      if (!ajustes.length) A.poner(["Ninguno entre esas fechas"]);
+      var trasbordos = m.datos.novedades || [];
+      if (!ajustes.length && !trasbordos.length) A.poner(["Ninguno entre esas fechas"]);
       ajustes.forEach(function (a) {
         A.poner([a.dia, a.interno, a.cantidad, a.motivo, a.nota || "", a.escrita_por_correo || "", momento(a.escrita_en),
           a.anulado_en ? (a.anulado_motivo || "") + " (" + (a.anulado_por_correo || "") + ", " + momento(a.anulado_en) + ")" : ""]);
+      });
+      trasbordos.forEach(function (x) {
+        A.poner([x.dia, x.interno, x.cantidad, "Trasbordo", "Del " + x.interno_origen + " · novedad N° " + x.numero,
+          capitalizar(x.nombre_conductor || "") + " (conductor)", momento(x.ocurrio_en),
+          x.anulado_en ? (x.anulado_motivo || "") + " (" + (x.anulado_por_correo || "") + ", " + momento(x.anulado_en) + ")" : ""]);
       });
       A.cerrar();
       var N = libro.addWorksheet("Notas");
@@ -2887,7 +3123,7 @@
         "Sin ruta: lo que entró fuera del viaje a viaje (en la ruta sin viaje, y en el patio o el taller). Ya va dentro de Sonar y de los ingresos: la columna solo lo muestra.",
         "Salidas P1: lo que contó bajando en los viajes más lo que bajó fuera de ellos. Salidas P2 va en 0: el sensor no separa las puertas.",
         "Descuento>20 va en 0: sin tope por viaje.",
-        "Ajustes: los que escribieron los despachadores en Control (taller, administrativo, despachador...), más los gestores que subieron con su código y lo que control corrigió en un viaje.",
+        "Ajustes: los que escribieron los despachadores en Control (taller, administrativo, despachador...), más los gestores que subieron con su código, lo que control corrigió en un viaje y los trasbordos que reportó el conductor del bus que recibió los pasajeros (novedades de la app). La hoja Ajustes los trae uno por uno.",
         "Viajes realizados: los viajes con despacho; cada uno resta 2. Los sin despacho Sonar los pone como \"sin ruta\": su gente suma en Sonar, pero no restan.",
         "Pasajeros metro: los usos de la tarjeta Mifare (cívica) de ese bus, de la plantilla metro (fecha, vehiculo, total) o de los archivos de la liquidación. Cada archivo del Mifare va al día de su nombre, como en la plantilla (el \"01-10\" es el 1 de octubre), y la placa se pasa a bus con las placas de Sonar. Se restan de los ingresos y de las salidas; si el día no tiene Metro cargado, va vacío y no resta.",
         "El bus va como texto y con un espacio al final (\"703 \"), menos el 710 y el 756, igual que en Movilidad 2026.",
@@ -3659,6 +3895,18 @@
     $("gesHoy").addEventListener("click", function () { location.hash = "#/gestores/" + diaDeHoy(); });
     $("gesActualizar").addEventListener("click", function () { cargarGestores(); });
 
+    // Novedades del conductor
+    $("novForm").addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var desde = $("novDesde").value, hasta = $("novHasta").value;
+      if (!esFecha(desde) || !esFecha(hasta)) return aviso("Escoja las dos fechas.", "mal");
+      var nuevo = "#/novedades/" + desde + "/" + hasta;
+      if (location.hash === nuevo) { state.nov.lista = null; pintarNovedades(); cargarNovedades(); }
+      else location.hash = nuevo;
+    });
+    $("novHoy").addEventListener("click", function () { var h = diaDeHoy(); location.hash = "#/novedades/" + h + "/" + h; });
+    $("novTipo").addEventListener("change", function () { state.nov.tipo = this.value; pintarNovedades(); });
+
     // Movilidad
     $("movForm").addEventListener("submit", function (ev) {
       ev.preventDefault();
@@ -3705,6 +3953,7 @@
         else if (accion === "recargar-informe") consultarInforme();
         else if (accion === "recargar-gestores") cargarGestores();
         else if (accion === "recargar-movilidad") cargarMovilidad();
+        else if (accion === "recargar-novedades") cargarNovedades();
         return;
       }
       if (t.closest("[data-cerrar-hoja]") || t === $("hoja")) return cerrarHoja();
@@ -3720,6 +3969,8 @@
       if ((el = t.closest("[data-dano-aprobar]"))) return abrirRevisarDano(el.getAttribute("data-dano-aprobar"), true);
       if ((el = t.closest("[data-dano-rechazar]"))) return abrirRevisarDano(el.getAttribute("data-dano-rechazar"), false);
       if ((el = t.closest("[data-selfie]"))) return verSelfie(el.getAttribute("data-selfie"));
+      if ((el = t.closest("[data-nov-video]"))) return verVideoNovedad(el.getAttribute("data-nov-video"));
+      if ((el = t.closest("[data-nov-anular]"))) return abrirAnularNovedad(el.getAttribute("data-nov-anular"));
       if (t.closest("a, input, textarea, select, form")) return;
       if ((el = t.closest("tr[data-mov-dia]"))) {
         var dia = el.getAttribute("data-mov-dia");

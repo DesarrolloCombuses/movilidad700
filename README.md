@@ -29,6 +29,7 @@ Cuando se publica una versión nueva, arriba sale **"Hay una versión nueva del 
 | **Tarjeta del bus** | La tarjeta de papel completa, viaje por viaje. Al abrir un viaje se ve **el mapa de su recorrido** y por qué itinerario fue, cada apertura de puerta (hora, suben, bajan, dónde, sensor tapado), quién escribió cada número y sus correcciones, y el daño del validador con su foto. Excel e imprimir con firmas. |
 | **Informes** | Entre dos fechas, agrupado por bus, conductor, ruta, día o base, o de una sola base. Por conductor sale primero el que más plata dice de menos. El Excel trae el resumen, cada viaje, las correcciones, los daños y los avisos de los buses. |
 | **Movilidad** | La "Base de datos" de Movilidad 2026, como la sacaba 700control: un renglón por bus y día, con las mismas 25 columnas, entre dos fechas y con sus filtros. Los despachadores escriben los **ajustes** (taller, administrativo, despachador). **Descargar Excel** la deja igual al maestro, con las fórmulas, para pegar debajo. |
+| **Novedades** | Las que reportan los conductores desde su app: número, hora, bus, qué pasó (trasbordo con cuántos y de qué bus, varado, accidente u otra, con la nota), conductor y dónde. Los despachadores ven el **video** y pueden **anular** una novedad diciendo por qué. Entre dos fechas y por tipo. |
 | **Personal** | El personal de la empresa que se registró en los buses cada día (leyó el código del bus en el celular del conductor): hora, bus, a qué viaje se pegó (o **sin viaje**, para revisar) y quién. Los despachadores ven además la **selfie** (al tocarla se agranda) y **dónde** estaba. Antes se llamaba Gestores (el enlace sigue siendo `#/gestores`). |
 
 ## De dónde salen los datos
@@ -60,6 +61,14 @@ Desde el 16-oct-2026 el personal de la empresa (gestoras, auxiliares, mecánicos
 - **En la tarjeta del bus:** el viaje dice *"incluye 1 del personal (no se cobra)"* y en observaciones *"Personal: María Gómez (Gestor De Movilidad) 10:42"*. Al abrir el viaje sale la persona con su selfie, la hora y dónde estaba.
 - **En el Excel de la tarjeta:** la columna *Personal de la empresa (no se cobra)* y quién fue en Observaciones.
 - Lo de aprobar celulares (lo de abajo, v0.6.0) se quitó: la huella ya no se usa.
+
+### Las novedades del conductor (v0.11.0, novedades.sql: la versión 11)
+
+Desde el 16-oct-2026 el conductor reporta novedades en su app: trasbordo, bus varado o daño, accidente o incidente, u otra. Cada una tiene su número (N° 1001...) y puede traer un video de máximo 1 minuto en calidad media.
+
+- **El trasbordo** lo reporta el bus que **recibe** los pasajeros (el 722 se vara y sus 15 pasan al 735: lo reporta el 735). Va **de una vez** a los **Ajustes** de la movilidad de ese bus y ese día: en Observaciones sale *"Trasbordo 15 del 722 (N° 1001)"*, la hoja de ajustes del bus los lista y la hoja *Ajustes* del Excel los trae uno por uno.
+- **Anular:** solo un despachador, en la pestaña Novedades, con el porqué. La novedad no se borra; deja de restar.
+- **Los videos** solo los ven los despachadores (enlace firmado de 1 hora). A los **90 días** se borran: lo hace Control cuando entra un despachador (una vez por sesión), y la novedad queda con *Borrado a los 90 días*.
 
 ### Los gestores (v0.6.0, versión 8 del SQL; ya no se usa desde el 16-oct)
 

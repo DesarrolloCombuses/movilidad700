@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./css/control.css?v=0.10.0">
+  <link rel="stylesheet" href="./css/control.css?v=0.11.0">
 </head>
 <body>
 
@@ -54,6 +54,7 @@
       <a href="#/informes" data-pestana="informes">Informes</a>
       <a href="#/movilidad" data-pestana="movilidad">Movilidad</a>
       <a href="#/gestores" data-pestana="gestores">Personal</a>
+      <a href="#/novedades" data-pestana="novedades">Novedades</a>
     </nav>
     <div class="quien">
       <span id="quienCorreo" class="quien-correo"></span>
@@ -170,7 +171,7 @@
                 <tr><th scope="row">Sonar</th><td>Todo lo que contó la puerta entrando en el día: en los viajes y fuera de ellos.</td></tr>
                 <tr><th scope="row">Viajes realizados</th><td>Los viajes con despacho. Cada viaje resta 2.</td></tr>
                 <tr><th scope="row">Pasajeros metro</th><td>Los usos de la tarjeta del Metro (Mifare) de ese bus ese día. Llegan con la plantilla metro (punto 2).</td></tr>
-                <tr><th scope="row">Ajustes</th><td>Los que escriben los despachadores con <strong>+ Ajuste</strong>, más los gestores que subieron con su código (lo de antes del 16-oct) y lo que control corrigió en un viaje.</td></tr>
+                <tr><th scope="row">Ajustes</th><td>Los que escriben los despachadores con <strong>+ Ajuste</strong>, más los <strong>trasbordos</strong> que reporta el conductor del bus que recibe los pasajeros (pestaña Novedades), los gestores que subieron con su código (lo de antes del 16-oct) y lo que control corrigió en un viaje.</td></tr>
                 <tr><th scope="row">Descuento&gt;20</th><td>Va en 0.</td></tr>
                 <tr><th scope="row">Ingresos totales</th><td><strong>Sonar − Pasajeros metro − 2 × Viajes realizados − Ajustes</strong></td></tr>
                 <tr><th scope="row">Salidas P1</th><td>Lo que contó bajando, en los viajes y fuera de ellos. Salidas P2 va en 0 (el sensor no separa las puertas).</td></tr>
@@ -283,6 +284,30 @@
       <div id="gesCuerpo"></div>
     </section>
 
+    <!-- ---- Novedades del conductor: trasbordo, varado, accidente u otra, con su número y su video ---- -->
+    <section id="vistaNovedades" class="vista" hidden>
+      <div class="cabeza">
+        <div>
+          <h1>Novedades del conductor</h1>
+          <p id="novSub" class="sub">Las que reportan los conductores desde su app, con su número y su video.</p>
+        </div>
+      </div>
+      <form id="novForm" class="inf-form" novalidate>
+        <label class="campo"><span>Desde</span><input id="novDesde" type="date" required></label>
+        <label class="campo"><span>Hasta</span><input id="novHasta" type="date" required></label>
+        <label class="campo"><span>Tipo</span><select id="novTipo">
+          <option value="">Todas</option>
+          <option value="trasbordo">Trasbordo</option>
+          <option value="varado">Bus varado o daño</option>
+          <option value="accidente">Accidente o incidente</option>
+          <option value="otra">Otra novedad</option>
+        </select></label>
+        <button class="btn btn-primario" type="submit">Ver</button>
+        <button id="novHoy" class="btn btn-sutil" type="button">Hoy</button>
+      </form>
+      <div id="novCuerpo"></div>
+    </section>
+
   </main>
 </div>
 
@@ -307,7 +332,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="./js/control-config.js?v=0.10.0"></script>
-<script src="./js/control.js?v=0.10.0"></script>
+<script src="./js/control-config.js?v=0.11.0"></script>
+<script src="./js/control.js?v=0.11.0"></script>
 </body>
 </html>
