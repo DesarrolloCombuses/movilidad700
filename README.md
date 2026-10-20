@@ -25,7 +25,8 @@ Cuando se publica una versión nueva, arriba sale **"Hay una versión nueva del 
 
 | Sección | Para qué |
 |---|---|
-| **Día** | Todos los buses de un día: viajes, pasajeros y plata del sensor y del conductor, la diferencia, cívicas, tiquetes y qué falta o hay que revisar. Una tabla **por base** con sus totales; al tocar una base queda solo esa. Filtros: con aviso, no cuadran, por revisar, falta algo, sin despacho, por base y por ruta. El botón **Excel viaje a viaje** descarga el día completo como lo arman los auxiliares. |
+| **Día** | Todos los buses de un día: viajes, pasajeros y plata del sensor y del conductor, la diferencia, cívicas, tiquetes y qué falta o hay que revisar, en tiempo real (se vuelve a pedir solo cada 2 minutos). Filtros: con aviso, no cuadran, por revisar, sin llenar, sin despacho, por base y por ruta. El botón **Excel viaje a viaje** descarga el día completo como lo arman los auxiliares. |
+| **Por base** | Un renglón por base con sus totales del día (buses, viajes, sensor, lo que dice el conductor, la diferencia, cívicas, tiquetes y estado) y el de todas las bases. Al tocar una base se abre el Día solo con esa base. |
 | **Tarjeta del bus** | La tarjeta de papel completa, viaje por viaje. Al abrir un viaje se ve **el mapa de su recorrido** y por qué itinerario fue, cada apertura de puerta (hora, suben, bajan, dónde, sensor tapado), quién escribió cada número y sus correcciones, y el daño del validador con su foto. Excel e imprimir con firmas. |
 | **Informes** | Entre dos fechas, agrupado por bus, conductor, ruta, día o base, o de una sola base. Por conductor sale primero el que más plata dice de menos. El Excel trae el resumen, cada viaje, las correcciones, los daños y los avisos de los buses. |
 | **Movilidad** | La "Base de datos" de Movilidad 2026, como la sacaba 700control: un renglón por bus y día, con las mismas 25 columnas, entre dos fechas y con sus filtros. Los despachadores escriben los **ajustes** (taller, administrativo, despachador). **Descargar Excel** la deja igual al maestro, con las fórmulas, para pegar debajo. |
@@ -111,7 +112,7 @@ Hasta agosto, la "Base de datos" de Movilidad 2026 se armaba con la plantilla [7
 | **Pasajeros metro** | Los usos de la tarjeta Mifare (cívica) de cada bus: de la **plantilla metro** (fecha, vehiculo, total) o de los archivos *LiquidacionUsosTransporteMifare*. En los días con Metro cargado, el bus sin usos va en 0; el día sin Metro va vacío y no resta. Se resta de los ingresos y de las salidas. |
 
 - **La ayuda** (arriba, plegada: "¿Cómo funciona la movilidad y cómo se carga el Metro?") explica en la misma pantalla cómo sale cada número, con el ejemplo del 703 del 1 de octubre, cómo armar y cargar la plantilla metro, cómo cruza y qué quiere decir cada aviso.
-- **Despachos no realizados** (arriba de la tabla, abierto; 15-oct-2026): una tabla con **un renglón por bus y una columna por día**, y en cada cuadro cuántos despachos no se hicieron y en qué sentido (**↑ sube al aeropuerto**, **↓ baja del aeropuerto**, por el nombre del itinerario), con los totales por bus y por día. Tocar un cuadro, un bus o un día pone ese filtro (también en la Base de datos), y abajo sale la lista **separada por día** con el bus, el viaje, la hora, los km que anduvo y cuánto duró. Un despacho **no se realizó** cuando Sonar lo canceló **y** su recorrido GPS (tarjeta_recorridos) anduvo menos de la mitad de lo normal de esa ruta (`KM_NORMAL` en control.js: la mediana de cada itinerario del 1 al 14 de octubre). Solo cancelado no basta: del 1 al 14 de octubre, 674 de 920 cancelados hicieron la ruta completa. Ejemplo: el 703 del 1-oct, viaje 3, a las 10:32 a. m.: 0 km en 1 minuto. Del 1 al 14 de octubre fueron 164 (110 suben, 54 bajan), y 55 cancelados no tienen GPS (van aparte: no se sabe). **Siguen contando en Viajes realizados**: solo se ven. El Excel los trae en las hojas *Despachos no realizados* (la lista) y *No realizados por bus y día* (la tabla).
+- **Despachos no realizados** (15-oct-2026; **solo en el Excel desde v0.14.2**: el 20-oct el usuario pidió quitarlos de la pantalla porque no son necesarios ahí). Se revisan con el GPS al descargar el Excel, no al abrir Movilidad. Un despacho **no se realizó** cuando Sonar lo canceló **y** su recorrido GPS (tarjeta_recorridos) anduvo menos de la mitad de lo normal de esa ruta (`KM_NORMAL` en control.js: la mediana de cada itinerario del 1 al 14 de octubre). Solo cancelado no basta: del 1 al 14 de octubre, 674 de 920 cancelados hicieron la ruta completa. Ejemplo: el 703 del 1-oct, viaje 3, a las 10:32 a. m.: 0 km en 1 minuto. Del 1 al 14 de octubre fueron 164 (110 suben, 54 bajan), y 55 cancelados no tienen GPS (van aparte: no se sabe). **Siguen contando en Viajes realizados**: solo se ven. El Excel los trae en las hojas *Despachos no realizados* (la lista) y *No realizados por bus y día* (la tabla).
 - **La pantalla** es la Base de datos: las mismas columnas del Excel, en el mismo orden, con la fila de totales abajo. Se filtra como en 700control: por **día**, **base**, **Dif < 0**, **Metro > 20**, texto y **vehículos**. Arriba van los totales y el **Resumen por día** (tocar un día deja solo ese día).
 - **Escribir un ajuste:** en el renglón del bus, **+ Ajuste**: cuántas personas y el motivo. No se borra: se **anula** con el porqué, y queda quién y cuándo.
 - **Cargar Metro** (solo despachadores). Antes de guardar muestra qué día, cuántos usos y cuántos buses trae cada archivo, y avisa si un bus no está en Sonar ese día o tiene Metro un día en que no hizo viajes. Recibe (15-oct-2026):
@@ -137,10 +138,48 @@ Un aviso que se arregla queda en el historial del día ("Tuvo: … visto de 10:0
 
 Debajo de los avisos, el Día dice **qué buses tienen viajes que el conductor no llenó** en Mi tarjeta del
 portal: un viaje que ya llegó y al que le falta la cívica, los pasajeros o los tiquetes. Los viajes en camino
-no cuentan. Por cada bus salen los conductores con cuántos viajes le faltan a cada uno (*"Sanchez … (6) ·
-Quezada … (5)"*), *"11 de 11"* y qué falta. Van primero los que más tienen sin llenar; se ven los 8 primeros y
+no cuentan. Por cada bus salen los conductores con cuántos viajes le faltan a cada uno (*"conductor del turno 1 (6) ·
+conductor del turno 2 (5)"*), *"11 de 11"* y qué falta. Van primero los que más tienen sin llenar; se ven los 8 primeros y
 "Ver los N buses" muestra el resto. "Filtrar la lista de abajo" deja en la tabla solo esos buses (es el mismo
 filtro "Sin llenar", que antes se llamaba "Falta algo" y contaba también los viajes en camino).
+
+### Por base aparte (v0.14.0)
+
+La tabla de las bases salió del Día y es una pestaña arriba, **Por base** (`#/bases/AAAA-MM-DD`), para que el
+Día quede solo con el viaje a viaje de los buses. Las dos miran el mismo día: cambiar la fecha en una la cambia
+en la otra, y Actualizar o el refresco de cada 2 minutos sirven para las dos. Tocar una base abre el Día solo
+con esa base (queda escogida en "Todas las bases" de los filtros); "Todas las bases" abre el Día con todos.
+
+### El personal de la empresa queda como novedad (v0.14.1)
+
+Cuando una persona de la empresa lee el código del bus, se ve en el Estado del Día y de Por base
+(*"Personal de la empresa 1"*) y hay un filtro **Personal de la empresa** en el Día. Si leyó el código con el bus
+parqueado entre dos viajes (más de 30 minutos antes del despacho o después de que llegó), no se pega a ningún viaje
+ni suma a los pasajeros: el chip dice *"(1 sin viaje)"* y la tarjeta del bus lo muestra en el recuadro
+**Personal de la empresa sin viaje**, con la hora (y la selfie y el lugar para los despachadores). Así pasó el
+18-oct con 5 registros en 5 buses, que antes no salían en ninguna tarjeta.
+
+### Las fechas se ven solas (v0.14.3)
+
+Al cambiar una fecha, la pantalla se actualiza sola, sin tocar Ver ni Consultar: Día, Por base, Tarjeta del bus
+(con el bus escrito), Informes, Movilidad, Personal y Novedades. Espera medio segundo por si la persona sigue
+escribiendo, y un año a medio escribir (0202…) no cuenta. Si la fecha de inicio queda después de la final, espera
+a que se cambie la otra. En Informes, cambiar "Agrupar por" reagrupa de una vez sin volver a traer los viajes, y si
+se cambian las fechas mientras trae, queda el último pedido. Los botones Ver y Consultar siguen, para volver a traer.
+
+### El inicio de labores del conductor (v0.14.4)
+
+Control dice si el conductor de cada bus hizo el **inicio de labores**: la entrada en la asistencia (tabla
+`asistencias`), marcada desde su celular en el portal (*celular*) o en un equipo con sesión de administrador en la
+oficina (*oficina*).
+- **Día:** debajo de cada conductor, *"Inicio 04:52 · oficina"* o, en rojo, *"Sin inicio de labores"*; el aviso
+  *Sin inicio de labores* en el Estado, el filtro con ese nombre y, arriba, el cuadro *Inicio de labores: 88 de 90*.
+- **Por base:** cuántos conductores de cada base no lo hicieron.
+- **Tarjeta del bus:** la hora de inicio y de salida de cada conductor.
+
+El cruce es por el nombre que trae Sonar contra la lista del personal (`colaboradores`). Si no es idéntico, toma el
+nombre con más palabras iguales (al menos 3) y, si empatan, el que reportó ese bus. Cuentan las marcas del día y las
+del día siguiente antes de las 2:30. Con los datos reales: 19-oct 90 de 90; 18-oct 91 de 93.
 
 ### El día de la tarjeta
 

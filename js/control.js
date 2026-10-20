@@ -90,7 +90,7 @@
     nov: { desde: null, hasta: null, lista: null, error: null, cargando: false, hay: true, tipo: "", limpiado: false },
     // Movilidad: la Base de datos de Movilidad 2026 (movilidad.sql: ajustes y archivos planos)
     mov: { desde: null, hasta: null, datos: null, filas: null, error: null, cargando: false, resumenAbierto: false,
-      noRealizados: null, noRealizadosError: null, noRealizadosPromesa: null, noRealizadosAbierto: true,
+      noRealizadosPromesa: null,
       entradas: true, salidas: true, tablas: true, cargadoEn: null, armandoExcel: false,
       filtro: { dia: "", base: "", difNeg: false, metro20: false, texto: "", vehiculos: [] } },
     v8: false,
@@ -124,6 +124,21 @@
   }
   function textoCorte() { return "de " + horaDelCorte() + " a " + horaDelCorte() + " del día siguiente"; }
   function esFecha(s) { return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "")); }
+
+  // Al cambiar una fecha se ve de una vez, sin tocar Ver (pedido del usuario el 20-oct-2026). Se espera medio
+  // segundo por si la persona sigue escribiendo, y un año a medio escribir (0002, 0020, 0202...) no cuenta.
+  function fechaRazonable(s) { return esFecha(s) && s >= "2020-01-01" && s <= "2099-12-31"; }
+  function alCambiarFechas(ids, accion) {
+    var espera = null;
+    ids.forEach(function (id) {
+      $(id).addEventListener("change", function () {
+        clearTimeout(espera);
+        espera = setTimeout(function () {
+          if (ids.every(function (x) { return fechaRazonable($(x).value); })) accion();
+        }, 500);
+      });
+    });
+  }
   function sumarDias(fecha, dias) {
     var d = new Date(fecha + "T12:00:00Z");
     d.setUTCDate(d.getUTCDate() + dias);
@@ -386,10 +401,12 @@
   function enrutar() {
     if (!state.user) return;
     var partes = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
-    var vista = ["dia", "bus", "informes", "movilidad", "gestores", "novedades"].indexOf(partes[0]) >= 0 ? partes[0] : "dia";
+    var vista = ["dia", "bases", "bus", "informes", "movilidad", "gestores", "novedades"].indexOf(partes[0]) >= 0 ? partes[0] : "dia";
     mostrarVista(vista);
     if (vista === "dia") {
       abrirDia(esFecha(partes[1]) ? partes[1] : state.dia.fecha || diaDeHoy());
+    } else if (vista === "bases") {
+      abrirBases(esFecha(partes[1]) ? partes[1] : state.dia.fecha || diaDeHoy());
     } else if (vista === "bus") {
       abrirBus(partes[1] || state.bus.interno, esFecha(partes[2]) ? partes[2] : state.bus.fecha || state.dia.fecha || diaDeHoy());
     } else if (vista === "gestores") {
@@ -410,6 +427,7 @@
   function mostrarVista(vista) {
     state.vista = vista;
     $("vistaDia").hidden = vista !== "dia";
+    $("vistaBases").hidden = vista !== "bases";
     $("vistaBus").hidden = vista !== "bus";
     $("vistaInformes").hidden = vista !== "informes";
     $("vistaGestores").hidden = vista !== "gestores";
@@ -427,6 +445,7 @@
     var dia = document.querySelector('[data-pestana="dia"]');
     var bus = document.querySelector('[data-pestana="bus"]');
     if (state.dia.fecha) dia.href = "#/dia/" + state.dia.fecha;
+    if (state.dia.fecha) document.querySelector('[data-pestana="bases"]').href = "#/bases/" + state.dia.fecha;
     if (state.bus.interno) bus.href = "#/bus/" + encodeURIComponent(state.bus.interno) + "/" + state.bus.fecha;
     if (state.ges.fecha) document.querySelector('[data-pestana="gestores"]').href = "#/gestores/" + state.ges.fecha;
     if (state.nov.desde) document.querySelector('[data-pestana="novedades"]').href = "#/novedades/" + state.nov.desde + "/" + state.nov.hasta;
@@ -441,7 +460,7 @@
       conductor: 0, plataConductor: 0, escribio: 0, comparados: 0,
       faltaCivica: 0, faltaPasajeros: 0, faltaTiquetes: 0,
       dif: 0, difPlata: 0, noCuadran: 0, civicas: 0, tiquetes: 0,
-      revisarCivica: 0, danos: 0, enCurso: 0, corregidos: 0, sinLlenar: 0,
+      revisarCivica: 0, danos: 0, enCurso: 0, corregidos: 0, sinLlenar: 0, personalEmpresa: 0, personalSinViaje: 0, sinInicio: 0,
       estadoBus: null, avisosBus: 0,     // cómo está el bus (tarjeta_buses_dia) / cuántos buses con aviso
     };
   }
@@ -475,6 +494,7 @@
     if (f.dano_estado === "reportado") r.danos++;
     if (f.lectura_corregida || f.tiquetes_corregidos || f.pasajeros_conductor_corregidos) r.corregidos++;
     if (sinLlenar(f)) r.sinLlenar++;
+    r.personalEmpresa += n(f.personal);
     // La diferencia solo cuenta cuando el viaje ya llegó: en camino el sensor todavía puede contar.
     if (f.estado_calculo === "en_curso") {
       r.enCurso++;
@@ -554,6 +574,7 @@
     if (eb) chips.push(chip(eb[0], eb[1]));
     else if (r.avisosBus) chips.push(chip("mal", r.avisosBus === 1 ? "1 bus con aviso" : r.avisosBus + " buses con aviso"));
     if (r.estadoBus && !conAviso(r.estadoBus) && avisosPasados(r.estadoBus).length) chips.push(chip("revisa", "Tuvo avisos"));
+    if (r.sinInicio) chips.push(chip("mal", r.sinInicio === 1 ? "Sin inicio de labores" : r.sinInicio + " sin inicio de labores"));
     if (r.danos) chips.push(chip("revisa", r.danos === 1 ? "Daño por revisar" : r.danos + " daños por revisar"));
     if (r.noCuadran) chips.push(chip("mal", r.noCuadran === 1 ? "1 viaje no cuadra" : r.noCuadran + " viajes no cuadran"));
     if (r.revisarCivica) chips.push(chip("revisa", "Cívica por revisar"));
@@ -564,13 +585,17 @@
     if (faltas.length) chips.push(chip("", "Falta " + faltas.join(" · ")));
     if (r.enCurso) chips.push(chip("info", "En camino"));
     if (!chips.length) chips.push(chip("ok", "Completa"));
+    if (r.personalEmpresa) {
+      chips.push(chip("personal", "Personal de la empresa " + r.personalEmpresa +
+        (r.personalSinViaje ? " (" + r.personalSinViaje + " sin viaje)" : "")));
+    }
     return '<div class="chips">' + chips.join("") + "</div>";
   }
 
   // Para ordenar por estado: lo más grave arriba.
   function gravedad(r) {
     var avisos = conAviso(r.estadoBus) ? 1 : r.avisosBus;
-    return avisos * 10000 + r.danos * 1000 + r.noCuadran * 100 + r.revisarCivica * 10 +
+    return avisos * 10000 + r.danos * 1000 + n(r.sinInicio) * 500 + r.noCuadran * 100 + r.revisarCivica * 10 +
       (r.faltaCivica + r.faltaPasajeros + r.faltaTiquetes);
   }
 
@@ -655,11 +680,7 @@
   // ================================================================ DÍA: todos los buses
   function abrirDia(fecha) {
     var d = state.dia;
-    if (d.fecha !== fecha) {
-      d.fecha = fecha;
-      d.filas = null;
-      d.error = null;
-    }
+    ponerFechaDia(fecha);
     $("diaFecha").value = fecha;
     $("diaSub").textContent = fechaLarga(fecha) + " · " + textoCorte() + (fecha === diaDeHoy() ? " · hoy" : "");
     actualizarPestanas();
@@ -667,24 +688,47 @@
     if (!d.filas && !d.cargando) cargarDia();
   }
 
+  // El Día y Por base miran el mismo día con los mismos datos: cambiar la fecha en uno la cambia en el otro.
+  function ponerFechaDia(fecha) {
+    var d = state.dia;
+    if (d.fecha !== fecha) {
+      d.fecha = fecha;
+      d.filas = null;
+      d.error = null;
+    }
+  }
+
+  function pintarVistaDelDia() {
+    if (state.vista === "bases") pintarPorBase();
+    else pintarDia();
+  }
+
   async function cargarDia() {
     var d = state.dia, fecha = d.fecha;
     d.cargando = true;
-    $("diaActualizar").disabled = true;
-    if (!d.filas) pintarDia();
+    $("diaActualizar").disabled = $("basesActualizar").disabled = true;
+    if (!d.filas) pintarVistaDelDia();
     try {
       // Si la programación o el estado de los buses no se pueden leer, el día sale igual, sin eso.
       var bases = traerBases(fecha, fecha).catch(function () { return null; });
       var estados = traerTodo(function () {
         return client.from("tarjeta_buses_dia").select(CAMPOS_ESTADO_BUS).eq("dia", fecha).order("interno");
       }).catch(function () { return null; });
+      var asistencia = traerAsistencia(fecha, true).catch(function () { return null; });
+      var personal = state.v10 ? traerTodo(function () {
+        return client.from("v_personal_viajes").select("id_local,interno,clave").eq("dia", fecha).order("leido_en").order("id_local");
+      }).catch(function () { return null; }) : Promise.resolve(null);
       var filas = await traerTodo(function () {
         return client.from("v_tarjeta_viajes").select(CAMPOS_VIAJE).eq("dia", fecha)
           .order("interno").order("hora_salida").order("clave");
       });
       var porBus = await bases;
       var lista = await estados;
+      var registros = await personal;
+      var marcas = await asistencia;
       if (d.fecha !== fecha) return;
+      d.asistencia = marcas;
+      d.personal = registros ? personalPorBus(registros) : null;
       ponerBases(filas, porBus);
       d.conBases = !!porBus;
       d.porBus = porBus;
@@ -703,9 +747,130 @@
       if (d.fecha === fecha) d.error = err;
     } finally {
       d.cargando = false;
-      $("diaActualizar").disabled = false;
-      if (state.vista === "dia" && d.fecha === fecha) pintarDia();
+      $("diaActualizar").disabled = $("basesActualizar").disabled = false;
+      if ((state.vista === "dia" || state.vista === "bases") && d.fecha === fecha) pintarVistaDelDia();
     }
+  }
+
+  // El personal de la empresa que leyó el código de cada bus ese día, con y sin viaje (v_personal_viajes).
+  // Sin viaje = el bus no iba en un viaje (estaba parqueado entre dos): no suma a los pasajeros, pero la
+  // novedad tiene que verse. Pedido del usuario el 20-oct-2026.
+  function personalPorBus(registros) {
+    var por = {};
+    registros.forEach(function (p) {
+      var x = por[String(p.interno)] || (por[String(p.interno)] = { total: 0, sinViaje: 0 });
+      x.total++;
+      if (!p.clave) x.sinViaje++;
+    });
+    return por;
+  }
+
+  // Si se pudo leer v_personal_viajes manda ella (trae también los sin viaje); si no, queda lo de los viajes.
+  function ponerPersonal(buses, d) {
+    if (!d.personal) return;
+    buses.forEach(function (r) {
+      var x = d.personal[r.clave];
+      r.personalEmpresa = x ? x.total : 0;
+      r.personalSinViaje = x ? x.sinViaje : 0;
+    });
+  }
+
+  // ================================================================ INICIO DE LABORES (asistencias)
+  // Pedido del usuario el 20-oct-2026: saber si el conductor de cada bus hizo el inicio de labores, es decir, la
+  // ENTRADA en asistencias (desde su celular en el portal, o en la oficina). Se busca por el nombre que trae Sonar
+  // contra la lista del personal (colaboradores); si no es idéntico, el nombre con más palabras iguales (al menos 3),
+  // y si empatan, el que reportó ese bus. El 19-oct dio 90 de 90 conductores (81 idénticos y 9 parecidos).
+  // Cuentan las marcas del día y las del día siguiente antes de la hora de corte (el día va de 2:30 a 2:30).
+  var ORIGEN_MARCA = { movil: "celular", movil_sin_foto: "celular", admin_form: "oficina", web: "web", cierre_declarado: "declarada" };
+  var asistenciaGuardada = {};                // fecha -> { t, promesa }
+  function normNombre(s) {
+    return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase()
+      .replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  }
+  function horaCorte() {
+    function dos(x) { return (x < 10 ? "0" : "") + x; }
+    return dos(Math.floor(CORTE_MIN / 60)) + ":" + dos(CORTE_MIN % 60);
+  }
+
+  function traerAsistencia(fecha, fresca) {
+    var g = asistenciaGuardada[fecha];
+    if (g && !fresca && Date.now() - g.t < (fecha === diaDeHoy() ? cfg.REFRESCO_MS || 120000 : 30 * 60 * 1000)) return g.promesa;
+    var manana = sumarDias(fecha, 1), corte = horaCorte();
+    var promesa = traerTodo(function () {
+      return client.from("asistencias").select("id,sentido,origen,vehiculo_reporte,fecha,hora,colaboradores(nombre)")
+        .gte("fecha", fecha).lte("fecha", manana).order("fecha").order("hora").order("id");
+    }).then(function (filas) {
+      var personas = {};
+      filas.forEach(function (m) {
+        if (m.fecha === manana && String(m.hora) >= corte) return;
+        var nombre = normNombre(m.colaboradores && m.colaboradores.nombre);
+        if (!nombre) return;
+        var p = personas[nombre] || (personas[nombre] = { entrada: null, salida: null, buses: {} });
+        var bus = (String(m.vehiculo_reporte || "").match(/^\s*(\d+)/) || [])[1];
+        if (bus) p.buses[bus] = true;
+        if (m.sentido === "entrada" && !p.entrada) p.entrada = m;
+        else if (m.sentido === "salida" && p.entrada) p.salida = m;        // la última después de la entrada
+      });
+      return { personas: personas, nombres: Object.keys(personas) };
+    });
+    asistenciaGuardada[fecha] = { t: Date.now(), promesa: promesa };
+    promesa.catch(function () { if (asistenciaGuardada[fecha] && asistenciaGuardada[fecha].promesa === promesa) delete asistenciaGuardada[fecha]; });
+    return promesa;
+  }
+
+  // Las marcas del conductor (por su nombre de Sonar): { entrada, salida } o null si no está en la asistencia del día.
+  function marcasDe(asis, conductor, interno) {
+    if (!asis || !conductor) return null;
+    var nombre = normNombre(conductor);
+    if (asis.personas[nombre]) return asis.personas[nombre];
+    var palabras = nombre.split(" "), puntos = 0, empate = [];
+    asis.nombres.forEach(function (k) {
+      var otras = k.split(" ");
+      var iguales = palabras.filter(function (x) { return otras.indexOf(x) >= 0; }).length;
+      if (iguales < Math.min(3, palabras.length, otras.length)) return;
+      if (iguales > puntos) { puntos = iguales; empate = [k]; }
+      else if (iguales === puntos) empate.push(k);
+    });
+    if (empate.length > 1 && interno) {
+      var delBus = empate.filter(function (k) { return asis.personas[k].buses[String(interno)]; });
+      if (delBus.length) empate = delBus;
+    }
+    return empate.length ? asis.personas[empate[0]] : null;
+  }
+  function hizoInicio(asis, conductor, interno) { var p = marcasDe(asis, conductor, interno); return !!(p && p.entrada); }
+
+  function ponerInicio(r, asis, interno) {
+    r.sinInicio = asis ? r.conductores.filter(function (c) { return !hizoInicio(asis, c, interno); }).length : 0;
+  }
+
+  function horaMarca(m) { return hora(m.fecha + "T" + String(m.hora).slice(0, 8) + "-05:00"); }
+  function textoMarca(m) { return horaMarca(m) + (ORIGEN_MARCA[m.origen] ? " · " + ORIGEN_MARCA[m.origen] : ""); }
+
+  function lineaInicio(asis, conductor, interno, conSalida) {
+    var p = marcasDe(asis, conductor, interno);
+    if (!p || !p.entrada) return '<span class="inicio" data-falta>Sin inicio de labores</span>';
+    return '<span class="inicio">Inicio ' + esc(textoMarca(p.entrada)) +
+      (conSalida && p.salida ? " · salida " + esc(horaMarca(p.salida)) : "") + "</span>";
+  }
+
+  function celdaConductores(r, asis) {
+    return r.conductores.map(function (c, i) {
+      var nombre = esc(capitalizar(c));
+      return (i ? '<span class="menor">y ' + nombre + "</span>" : nombre) + lineaInicio(asis, c, r.clave, false);
+    }).join("");
+  }
+
+  // El cuadro de arriba: cuántos conductores con viajes hicieron el inicio de labores.
+  function totalInicio(filas, asis) {
+    if (!asis) return "";
+    var conductores = {};
+    filas.forEach(function (f) { if (f.conductor) conductores[f.conductor] = conductores[f.conductor] || f.interno; });
+    var nombres = Object.keys(conductores);
+    if (!nombres.length) return "";
+    var faltan = nombres.filter(function (c) { return !hizoInicio(asis, c, conductores[c]); }).length;
+    return '<div class="total" data-tono="' + (faltan ? "mal" : "bien") + '"><span>Inicio de labores</span><strong>' +
+      (nombres.length - faltan) + " de " + nombres.length + "</strong><small>" +
+      (faltan ? (faltan === 1 ? "1 conductor sin marcar" : faltan + " conductores sin marcar") : "todos los conductores marcaron") + "</small></div>";
   }
 
   function pasaFiltro(r, d) {
@@ -714,6 +879,8 @@
     if (f === "revisar" && !(r.danos || r.revisarCivica)) return false;
     if (f === "falta" && !r.sinLlenar) return false;
     if (f === "sin_despacho" && !r.sd) return false;
+    if (f === "personal" && !r.personalEmpresa) return false;
+    if (f === "sin_inicio" && !r.sinInicio) return false;
     if (f === "aviso" && !tieneAvisos(r.estadoBus)) return false;
     if (d.ruta && r.rutas.indexOf(d.ruta) < 0) return false;
     var q = d.buscar.trim().toLowerCase();
@@ -731,7 +898,6 @@
     $("diaExcel").disabled = !(d.filas && d.filas.length) || !!d.armandoExcel;
     if (!d.filas) {
       totales.innerHTML = "";
-      $("diaBases").innerHTML = "";
       $("diaAvisos").innerHTML = "";
       $("diaSinLlenar").innerHTML = "";
       tabla.innerHTML = d.error ? cajaError("No se pudo traer el día: " + textoError(d.error), "recargar-dia")
@@ -744,7 +910,6 @@
     selBase.hidden = !d.conBases;
     var base = d.conBases ? opcionesBases(selBase, d.filas.concat(d.sinViajes || []), d.base) : "";
     var filas = base ? d.filas.filter(function (f) { return f.base === base; }) : d.filas;
-    pintarBases(d, base);
 
     var buses = resumir(filas, function (f) { return f.interno; });
     (d.sinViajes || []).forEach(function (e) {
@@ -755,6 +920,8 @@
       buses.push(r);
     });
     buses.forEach(function (r) { r.estadoBus = d.estados ? d.estados[r.clave] || null : null; });
+    ponerPersonal(buses, d);
+    buses.forEach(function (r) { ponerInicio(r, d.asistencia, r.clave); });
     pintarAvisos(d, buses, base);
     pintarSinLlenar(d, filas, base);
     var todo = nuevoResumen("todo");
@@ -764,7 +931,7 @@
     totales.innerHTML = totalesHtml(todo,
       '<div class="total"' + (avisan ? ' data-tono="mal"' : "") + "><span>" + (base ? "Buses · " + esc(base) : "Buses") + "</span><strong>" +
         buses.length + "</strong><small>" + (avisan ? (avisan === 1 ? "1 con aviso" : avisan + " con aviso") + " · " : "") +
-        (conProblemas ? conProblemas + " para revisar" : "ninguno para revisar") + "</small></div>");
+        (conProblemas ? conProblemas + " para revisar" : "ninguno para revisar") + "</small></div>" + totalInicio(filas, d.asistencia));
 
     // Las rutas del día, para el filtro
     var nombres = {};
@@ -792,11 +959,11 @@
         "</td></tr>";
     }
     visibles.forEach(function (r) {
-      var otros = r.conductores.length > 1 ? '<span class="menor">y ' + capitalizar(r.conductores.slice(1).join(", ")) + "</span>" : "";
+      var otros = !d.asistencia && r.conductores.length > 1 ? '<span class="menor">y ' + esc(capitalizar(r.conductores.slice(1).join(", "))) + "</span>" : "";
       html += '<tr class="fila-link" tabindex="0" data-bus="' + esc(r.clave) + '">' +
         '<td><span class="bus-num">' + esc(r.clave) + '</span><span class="menor">' + esc(r.placa) + "</span>" +
           (d.conBases && !base ? '<span class="menor">' + esc(r.bases.join(", ")) + "</span>" : "") + "</td>" +
-        "<td>" + esc(capitalizar(r.conductores[0] || "—")) + otros + "</td>" +
+        "<td>" + (d.asistencia && r.conductores.length ? celdaConductores(r, d.asistencia) : esc(capitalizar(r.conductores[0] || "—")) + otros) + "</td>" +
         celdasNumeros(r) +
         "<td>" + chipsEstado(r) + "</td></tr>";
     });
@@ -812,10 +979,44 @@
     tabla.innerHTML = html;
     $("diaPie").textContent = d.cargadoEn ? "Actualizado a las " + fmtHora.format(new Date(d.cargadoEn)) +
       ". Diferencia = lo que dice el conductor menos lo del sensor, solo en los viajes que ya llegaron." +
+      (d.asistencia ? " Inicio de labores = la entrada en la asistencia (celular u oficina), buscada por el nombre del conductor." : "") +
       (d.conBases ? " La base es la de la programación del día." : " No se pudo leer la programación: sin las bases.") : "";
   }
 
-  // Un renglón por base con sus totales; tocarlo deja solo esa base (y tocarlo otra vez, todas).
+  // ================================================================ POR BASE: los totales de cada base en el día
+  // Pedido del usuario el 20-oct-2026: la tabla de las bases arriba, aparte, sin meterse en el Día, que es el
+  // viaje a viaje de los buses en tiempo real.
+  function abrirBases(fecha) {
+    var d = state.dia;
+    ponerFechaDia(fecha);
+    $("basesFecha").value = fecha;
+    $("basesSub").textContent = fechaLarga(fecha) + " · " + textoCorte() + (fecha === diaDeHoy() ? " · hoy" : "");
+    actualizarPestanas();
+    pintarPorBase();
+    if (!d.filas && !d.cargando) cargarDia();
+  }
+
+  function pintarPorBase() {
+    var d = state.dia;
+    var caja = $("diaBases");
+    if (!d.filas) {
+      caja.innerHTML = d.error ? cajaError("No se pudo traer el día: " + textoError(d.error), "recargar-dia")
+        : '<p class="cargando">Trayendo las tarjetas del día…</p>';
+      $("basesPie").textContent = "";
+      return;
+    }
+    if (!d.conBases) {
+      caja.innerHTML = cajaError("No se pudo leer la programación del día: sin ella no se sabe la base de cada bus.", "recargar-dia");
+    } else {
+      pintarBases(d, d.base);
+      if (!caja.innerHTML) caja.innerHTML = '<p class="vacio">Todavía no hay tarjetas este día. Aparecen cuando el programa del servidor las publica.</p>';
+    }
+    $("basesPie").textContent = d.cargadoEn ? "Actualizado a las " + fmtHora.format(new Date(d.cargadoEn)) +
+      ". Toque una base para ver sus buses en el Día; “Todas las bases” los muestra todos." +
+      " Diferencia = lo que dice el conductor menos lo del sensor, solo en los viajes que ya llegaron." : "";
+  }
+
+  // Un renglón por base con sus totales; tocarlo abre el Día solo con esa base (el pie, con todas).
   function pintarBases(d, base) {
     var caja = $("diaBases");
     var sinViajes = d.sinViajes || [];
@@ -836,6 +1037,14 @@
     bases.sort(function (a, b) { return compararBases(a.clave, b.clave); });
     bases.forEach(function (r) {
       r.avisosBus = r.buses.filter(function (i) { return conAviso(d.estados && d.estados[i]); }).length;
+      ponerInicio(r, d.asistencia, null);
+      if (d.personal) {
+        r.personalEmpresa = r.personalSinViaje = 0;
+        r.buses.forEach(function (i) {
+          var x = d.personal[i];
+          if (x) { r.personalEmpresa += x.total; r.personalSinViaje += x.sinViaje; }
+        });
+      }
     });
     function renglon(r, valor, etiqueta, enPie) {
       var elegido = valor === base;
@@ -843,7 +1052,7 @@
         "<td><strong>" + esc(etiqueta) + "</strong></td>" +
         '<td class="n">' + r.buses.length + "</td>" + celdasNumeros(r) + (enPie ? "<td></td>" : "<td>" + chipsEstado(r) + "</td>") + "</tr>";
     }
-    caja.innerHTML = '<h2 class="seccion-titulo">Por base</h2><div class="tabla-caja"><table class="tabla-bases"><thead><tr>' +
+    caja.innerHTML = '<div class="tabla-caja"><table class="tabla-bases"><thead><tr>' +
       "<th>Base</th><th class=\"n\">Buses</th><th class=\"n\">Viajes</th><th class=\"n\">Sensor</th><th class=\"n\">$ Sensor</th>" +
       '<th class="n">Conductor dice</th><th class="n">$ Conductor</th><th class="n">Diferencia</th><th class="n">Cívicas</th>' +
       '<th class="n">Tiquetes</th><th>Estado</th></tr></thead><tbody>' +
@@ -1026,6 +1235,8 @@
         // v11.1: las novedades que reportó el conductor, cada una en su viaje
         conTiempo(client.from("conductor_novedades").select(CAMPOS_NOVEDAD).eq("interno", interno).eq("dia", fecha).order("numero"))
           .catch(function () { return { data: [] }; }),
+        // el inicio de labores de los conductores (asistencias)
+        traerAsistencia(fecha, false).catch(function () { return null; }),
       ]);
       if (res[0].error) throw res[0].error;
       if (b.interno !== interno || b.fecha !== fecha) return;
@@ -1042,6 +1253,7 @@
       b.diaManual = res[6].data || null;
       b.gestores = res[9] && res[9].data || [];
       b.personal = res[10] && res[10].data || [];
+      b.asistencia = res[12] || null;
       b.novedades = res[11] && !res[11].error ? res[11].data || [] : [];
       b.novPorClave = {};
       b.novedades.forEach(function (x) { if (x.clave_viaje) (b.novPorClave[x.clave_viaje] = b.novPorClave[x.clave_viaje] || []).push(x); });
@@ -1103,7 +1315,7 @@
       $("busExcel").disabled = $("busImprimir").disabled = true;
       cuerpo.innerHTML = avisoDelBus(b.estadoBus) + '<p class="vacio">El bus ' + esc(b.interno) + " no tiene viajes en la tarjeta del " +
         esc(fechaLarga(b.fecha).toLowerCase()) + "." + (b.estadoBus ? "" : " Revise el número, o puede que el programa del servidor todavía no la haya publicado.") +
-        "</p>";
+        "</p>" + bloquePersonalSinViaje(b.personal || []);
       return;
     }
     $("busExcel").disabled = $("busImprimir").disabled = false;
@@ -1114,8 +1326,8 @@
       (r.placa ? " · placa " + r.placa : "") + (b.base ? " · " + b.base : "");
     var dm = b.diaManual || {};
     var html = avisoDelBus(b.estadoBus) + '<div class="bus-cabeza">' +
-      dato("Conductor 1", capitalizar(r.conductores[0] || "—")) +
-      dato("Conductor 2", capitalizar(r.conductores[1] || "—") + (r.conductores.length > 2 ? " y " + (r.conductores.length - 2) + " más" : "")) +
+      datoConductor("Conductor 1", r.conductores[0], b) +
+      datoConductor("Conductor 2", r.conductores[1], b, r.conductores.length > 2 ? " y " + (r.conductores.length - 2) + " más" : "") +
       '<div class="dato dato-ancho"><span>Rutas</span><ul>' + (r.rutas.map(function (k) {
         var f = b.filas.filter(function (x) { return x.ruta === k; })[0];
         return "<li>" + esc(k + " · " + (rutaLegible(f && f.itinerario) || "")) + "</li>";
@@ -1149,12 +1361,35 @@
       html += '<div class="registro"><div class="registro-cabeza"><b>Novedades del conductor sin viaje</b></div>' +
         '<ul class="lista-ajustes">' + sueltas.map(liNovedad).join("") + "</ul></div>";
     }
+    html += bloquePersonalSinViaje((b.personal || []).filter(function (p) { return !p.clave || !claves[p.clave]; }));
     html += '<p class="pie no-imprimir">Toque un viaje para ver cada parada, quién escribió cada número y sus correcciones.' +
       (state.revisor ? "" : " Esta cuenta es de solo lectura: para corregir, hay que agregarla a tarjeta_revisores.") + "</p>";
     html += '<div class="firmas"><div>Firma del conductor</div><div>Firma de control</div></div>';
     quitarMapas();
     cuerpo.innerHTML = html;
     dibujarMapas();
+  }
+
+  // El personal que leyó el código del bus cuando no iba en un viaje (parqueado entre dos): no suma a ningún
+  // viaje, pero la novedad queda en la tarjeta.
+  function bloquePersonalSinViaje(lista) {
+    if (!lista.length) return "";
+    return '<div class="registro"><div class="registro-cabeza"><b>Personal de la empresa sin viaje</b></div>' +
+      '<ul class="gestores-lista">' + lista.map(liPersonal).join("") + "</ul>" +
+      '<p class="nota">Leyó el código del bus cuando el bus no iba en un viaje (más de 30 minutos antes del despacho o después ' +
+      "de que llegó). Queda la novedad, pero no suma a los pasajeros de ningún viaje.</p></div>";
+  }
+
+  function liPersonal(p) {
+    var foto = (state.bus.fotosPersonal || {})[p.id_local];
+    return '<li class="personal-item">' + selfieDe(foto, p.nombre) + "<span><strong>" + esc(capitalizar(p.nombre)) + "</strong>" +
+      (p.cargo ? " · " + esc(capitalizar(p.cargo)) : "") + " · " + hora(p.leido_en) +
+      (foto && foto.lat != null ? " · " + lugarDe(foto) : "") + "</span></li>";
+  }
+
+  function datoConductor(titulo, conductor, b, mas) {
+    return '<div class="dato"><span>' + esc(titulo) + "</span><strong>" + esc(capitalizar(conductor || "—") + (mas || "")) + "</strong>" +
+      (conductor && b.asistencia ? lineaInicio(b.asistencia, conductor, b.interno, true) : "") + "</div>";
   }
 
   function dato(titulo, valor) { return '<div class="dato"><span>' + esc(titulo) + "</span><strong>" + esc(valor) + "</strong></div>"; }
@@ -1205,7 +1440,7 @@
       '<td class="n">' + (f.tiquetes_escaneados != null ? esc(f.tiquetes_escaneados) + (f.tiquetes_corregidos ? '<span class="menor">corregidos</span>' : "")
         : chip("", "falta")) + "</td>" +
       "<td>" + esc(f.control || "") + (f.observaciones ? '<span class="menor">' + esc(f.observaciones) + "</span>" : "") +
-        (f.personal_detalle ? '<span class="menor personal-obs">Personal: ' + esc(f.personal_detalle) + "</span>" : "") +
+        (f.personal_detalle ? '<span class="menor personal-obs">Personal de la empresa: ' + esc(f.personal_detalle) + "</span>" : "") +
         novedadesDelViaje(f.clave).map(function (x) {
           return '<span class="menor nov-obs' + (x.anulado_en ? " nov-anulada" : "") + '">Novedad ' + esc(textoNovedadCorta(x)) + "</span>";
         }).join("") + "</td>" +
@@ -1284,12 +1519,7 @@
     var delPersonal = (b.personal || []).filter(function (p) { return p.clave === f.clave; });
     if (delPersonal.length) {
       der += '<div class="registro"><div class="registro-cabeza"><b>Personal de la empresa</b></div><ul class="gestores-lista">' +
-        delPersonal.map(function (p) {
-          var foto = (b.fotosPersonal || {})[p.id_local];
-          return '<li class="personal-item">' + selfieDe(foto, p.nombre) + "<span><strong>" + esc(capitalizar(p.nombre)) +
-            "</strong> · " + esc(capitalizar(p.cargo)) + " · " + hora(p.leido_en) +
-            (foto && foto.lat != null ? " · " + lugarDe(foto) : "") + "</span></li>";
-        }).join("") + "</ul>" +
+        delPersonal.map(liPersonal).join("") + "</ul>" +
         '<p class="nota">Leyó el código del bus en el celular del conductor. Va en los pasajeros del viaje, pero su pasaje no se cobra.</p></div>';
     }
 
@@ -2131,15 +2361,8 @@
       m.filas = armarMovilidad(m.datos);
       m.error = null;
       m.cargadoEn = Date.now();
-      // Los despachos no realizados se revisan después, con el GPS de los cancelados: la tabla no los espera.
-      m.noRealizados = null;
-      m.noRealizadosError = null;
-      m.noRealizadosPromesa = traerNoRealizados(desde, hasta);
-      m.noRealizadosPromesa.then(function (x) {
-        if (sigue()) { m.noRealizados = x; if (state.vista === "movilidad") pintarNoRealizados(); }
-      }, function (err) {
-        if (sigue()) { m.noRealizadosError = err; if (state.vista === "movilidad") pintarNoRealizados(); }
-      });
+      // Los despachos no realizados ya no salen en la pantalla (20-oct-2026): se revisan con el GPS solo al descargar el Excel.
+      m.noRealizadosPromesa = null;
     } catch (err) {
       if (sigue()) m.error = err;
     } finally {
@@ -2353,138 +2576,6 @@
     return { lista: lista.sort(orden), sinGps: sinGps.sort(orden) };
   }
 
-  // Cuántos no se hicieron y en qué sentido: { subida, bajada, otro } -> "2" con "1↑ 1↓" debajo.
-  function cuentaSentidos(x) {
-    var t = x.subida + x.bajada + x.otro;
-    if (!t) return "";
-    var s = [];
-    if (x.subida) s.push(x.subida + "↑");
-    if (x.bajada) s.push(x.bajada + "↓");
-    if (x.otro) s.push(x.otro + "?");
-    return "<strong>" + t + '</strong><span class="sentidos">' + s.join(" ") + "</span>";
-  }
-  function sentidosVacios() { return { subida: 0, bajada: 0, otro: 0 }; }
-  function ladoDe(d) { return d.sentido === "subida" || d.sentido === "bajada" ? d.sentido : "otro"; }
-
-  // Los despachos no realizados: la tabla de buses por días (todo el rango) y, debajo, la lista separada por día,
-  // con los filtros de día y de vehículos (tocar un número, un bus o un día los pone).
-  function pintarNoRealizados() {
-    var m = state.mov, caja = $("movNoRealizados");
-    if (!m.filas || !m.filas.length || rangoMovilidadMalo(m)) { caja.innerHTML = ""; return; }
-    if (m.noRealizadosError) {
-      caja.innerHTML = '<p class="aviso-programa">No se pudo revisar qué despachos no se realizaron: ' + esc(textoError(m.noRealizadosError)) + "</p>";
-      return;
-    }
-    var nr = m.noRealizados;
-    if (!nr) { caja.innerHTML = '<p class="pie">Revisando con el GPS qué despachos no se realizaron…</p>'; return; }
-    var f = m.filtro;
-    var porDia = {}, porBus = {}, total = sentidosVacios();
-    function dia(k) { return porDia[k] || (porDia[k] = { s: sentidosVacios(), sinGps: 0 }); }
-    function bus(k) { return porBus[k] || (porBus[k] = { s: sentidosVacios(), dias: {} }); }
-    nr.lista.forEach(function (d) {
-      var lado = ladoDe(d), b = bus(d.interno);
-      total[lado]++;
-      dia(d.dia).s[lado]++;
-      b.s[lado]++;
-      (b.dias[d.dia] = b.dias[d.dia] || sentidosVacios())[lado]++;
-    });
-    nr.sinGps.forEach(function (d) { dia(d.dia).sinGps++; });
-    var dias = Object.keys(porDia).sort(), buses = Object.keys(porBus).sort(compararInternos);
-    var unBus = f.vehiculos.length === 1 ? f.vehiculos[0] : "";
-    var html = '<details class="mov-resumen" id="movNoRealizadosDet"' + (m.noRealizadosAbierto ? " open" : "") + "><summary>" +
-      "Despachos no realizados: " + miles(nr.lista.length) + " (" + miles(total.subida) + " suben al aeropuerto, " + miles(total.bajada) +
-      " bajan)</summary>" +
-      '<p class="nota">Sonar los canceló y el GPS muestra que el bus anduvo menos de la mitad de lo normal de esa ruta: el despacho no ' +
-        "se hizo. Siguen contando en Viajes realizados de la movilidad. <strong>↑</strong> sube al aeropuerto, <strong>↓</strong> baja del aeropuerto. " +
-        "Toque un número para ver esos despachos abajo; un bus, para ver los suyos; un día, para ver los de ese día.</p>";
-    if (!dias.length) {
-      caja.innerHTML = html + '<p class="vacio">Ningún despacho sin realizar en esas fechas.</p></details>';
-      return;
-    }
-    // La tabla de buses por días
-    html += '<div class="tabla-caja"><table class="nr-matriz"><thead><tr><th class="fijo">Bus</th>' +
-      dias.map(function (k) {
-        return '<th class="n' + (f.dia === k ? " elegida" : "") + '" data-nr-dia="' + esc(k) + '" tabindex="0">' + esc(k.slice(8) + "/" + k.slice(5, 7)) +
-          '<span class="sentidos">' + esc(diaSemana(k).slice(0, 3)) + "</span></th>";
-      }).join("") + '<th class="n">Total</th></tr></thead><tbody>' +
-      buses.map(function (b) {
-        var x = porBus[b];
-        return '<tr' + (unBus === b ? ' class="elegida"' : "") + '><th class="fijo" data-nr-bus="' + esc(b) + '" tabindex="0">' + esc(b) + "</th>" +
-          dias.map(function (k) {
-            var c = x.dias[k];
-            return '<td class="n' + (c ? " nr-celda" : "") + (f.dia === k ? " elegida" : "") + (c && f.dia === k && unBus === b ? " marcada" : "") + '"' +
-              (c ? ' data-nr-dia="' + esc(k) + '" data-nr-bus="' + esc(b) + '" tabindex="0"' : "") + ">" + (c ? cuentaSentidos(c) : "") + "</td>";
-          }).join("") + '<td class="n">' + cuentaSentidos(x.s) + "</td></tr>";
-      }).join("") + "</tbody><tfoot>" +
-      '<tr><th class="fijo">Total</th>' + dias.map(function (k) { return '<td class="n">' + (cuentaSentidos(porDia[k].s) || "0") + "</td>"; }).join("") +
-        '<td class="n">' + cuentaSentidos(total) + "</td></tr>" +
-      (nr.sinGps.length ? '<tr class="apagado"><th class="fijo">Sin GPS</th>' + dias.map(function (k) {
-        return '<td class="n">' + (porDia[k].sinGps || "") + "</td>";
-      }).join("") + '<td class="n">' + nr.sinGps.length + "</td></tr>" : "") +
-      "</tfoot></table></div>";
-    if (nr.sinGps.length) {
-      html += '<p class="pie">Sin GPS: cancelados en Sonar que no tienen recorrido, de esos no se sabe si se hicieron (en la lista van en gris).</p>';
-    }
-    // La lista, separada por día, con los filtros de día y vehículos
-    function pasa(d) { return (!f.dia || d.dia === f.dia) && (!f.vehiculos.length || f.vehiculos.indexOf(d.interno) >= 0); }
-    var lista = nr.lista.filter(pasa), sinGps = nr.sinGps.filter(pasa);
-    var filtrado = f.dia || f.vehiculos.length;
-    html += '<div class="nr-lista-cabeza"><h3>Los despachos' + (filtrado ? ": " + esc([f.dia ? fechaCorta(f.dia) : "", f.vehiculos.length
-      ? (f.vehiculos.length === 1 ? "bus " + f.vehiculos[0] : f.vehiculos.length + " buses") : ""].filter(Boolean).join(" · ")) : " de todos los días") + "</h3>" +
-      (filtrado ? '<button class="btn btn-sutil btn-chico" type="button" data-nr-todos>Ver todos</button>' : "") + "</div>";
-    var grupos = {};
-    lista.concat(sinGps).forEach(function (d) { (grupos[d.dia] = grupos[d.dia] || []).push(d); });
-    var diasLista = Object.keys(grupos).sort();
-    if (!diasLista.length) {
-      html += '<p class="vacio">Ninguno con esos filtros.</p></details>';
-      caja.innerHTML = html;
-      return;
-    }
-    html += '<div class="tabla-caja tabla-no-realizados"><table><thead><tr><th>Bus</th><th class="n">Viaje</th><th>Despacho</th>' +
-      '<th>Itinerario</th><th>Sentido</th><th class="n">Anduvo</th><th class="n">Duró</th><th class="n">Subieron</th><th class="n">Bajaron</th></tr></thead><tbody>' +
-      diasLista.map(function (k) {
-        var del = grupos[k].sort(function (a, b) { return (a.km == null) - (b.km == null) || Date.parse(a.despacho_en) - Date.parse(b.despacho_en); });
-        var s = sentidosVacios(), sin = 0;
-        del.forEach(function (d) { if (d.km == null) sin++; else s[ladoDe(d)]++; });
-        return '<tr class="grupo"><td colspan="9">' + esc(diaSemana(k) + " " + fechaMov(k)) + " · " + (s.subida + s.bajada + s.otro) + " no realizados: " +
-          s.subida + " suben al aeropuerto, " + s.bajada + " bajan" + (s.otro ? ", " + s.otro + " sin sentido" : "") + (sin ? " · " + sin + " sin GPS" : "") + "</td></tr>" +
-          del.map(function (d) {
-            return "<tr" + (d.km == null ? ' class="apagado"' : "") + '><td><a class="bus-num" href="#/bus/' + encodeURIComponent(d.interno) + "/" + d.dia + '">' +
-              esc(d.interno) + '</a></td><td class="n">' + (d.viaje == null ? "—" : d.viaje) + "</td><td>" + esc(hora(d.despacho_en)) + "</td><td>" +
-              esc(rutaLegible(d.itinerario) || "—") + "</td><td>" + esc(SENTIDO_TEXTO[d.sentido]) + '</td><td class="n">' +
-              (d.km == null ? "Sin GPS" : kmTexto(d.km) + " de " + d.kmNormal + " km") + '</td><td class="n">' + (d.minutos == null ? "—" : d.minutos + " min") +
-              '</td><td class="n">' + d.subidas + '</td><td class="n">' + d.bajadas + "</td></tr>";
-          }).join("");
-      }).join("") + "</tbody></table></div></details>";
-    caja.innerHTML = html;
-  }
-
-  // Tocar en los despachos no realizados: un número (día y bus), un bus o un día. Otra vez lo mismo, lo quita.
-  function clicNoRealizados(ev) {
-    var el = ev.target.closest("[data-nr-dia],[data-nr-bus],[data-nr-todos]");
-    if (!el) return;
-    var f = state.mov.filtro;
-    if (el.hasAttribute("data-nr-todos")) {
-      f.dia = "";
-      f.vehiculos = [];
-    } else {
-      var dia = el.getAttribute("data-nr-dia"), bus = el.getAttribute("data-nr-bus");
-      var mismo = (!dia || f.dia === dia) && (!bus || (f.vehiculos.length === 1 && f.vehiculos[0] === bus));
-      if (mismo) {
-        if (dia) f.dia = "";
-        if (bus) f.vehiculos = [];
-      } else {
-        if (dia) f.dia = dia;
-        if (bus) f.vehiculos = [bus];
-        if (dia && !bus) f.vehiculos = f.vehiculos.length === 1 && state.mov.noRealizados.lista.some(function (d) {
-          return d.dia === dia && d.interno === f.vehiculos[0];
-        }) ? f.vehiculos : [];
-        if (bus && !dia && f.dia && !state.mov.noRealizados.lista.some(function (d) { return d.dia === f.dia && d.interno === bus; })) f.dia = "";
-      }
-    }
-    pintarMovilidad();
-  }
-
   function filtroMovVacio() { return { dia: "", base: "", difNeg: false, metro20: false, texto: "", vehiculos: [] }; }
 
   // Lo que dejan ver los filtros, como en 700control: día, base, Dif < 0, Metro > 20, el texto y los vehículos.
@@ -2529,7 +2620,6 @@
       cuerpo.innerHTML = malo ? '<p class="vacio">' + esc(malo) + "</p>"
         : m.error ? cajaError("No se pudo traer la movilidad: " + textoError(m.error), "recargar-movilidad")
         : '<p class="cargando">Trayendo los viajes y los buses de esos días…</p>';
-      pintarNoRealizados();
       return;
     }
     $("movExcel").disabled = !m.filas.length;
@@ -2581,7 +2671,6 @@
     cuerpo.innerHTML = html;
     pintarFiltrosMov(dias);
     pintarTablaMov();
-    pintarNoRealizados();
   }
 
   function pintarFiltrosMov(dias) {
@@ -3207,8 +3296,9 @@
       libro.calcProperties.fullCalcOnLoad = true;
       hojaBaseDeDatos(libro, m.filas);
       hojaResumenMovilidad(libro, m.filas);
-      // Los despachos no realizados (si todavía se estaban revisando con el GPS, se esperan)
-      var nr = await (m.noRealizadosPromesa || Promise.resolve(null)).catch(function () { return null; });
+      // Los despachos no realizados: se revisan con el GPS de los cancelados al descargar (una vez por rango)
+      if (!m.noRealizadosPromesa) m.noRealizadosPromesa = traerNoRealizados(m.desde, m.hasta);
+      var nr = await m.noRealizadosPromesa.catch(function () { m.noRealizadosPromesa = null; return null; });
       var NR = hojaVaV(libro, "Despachos no realizados", ["Día", "Bus", "Viaje", "Despacho", "Itinerario", "Sentido",
         "Km que anduvo", "Km normal de la ruta", "Minutos", "Subieron", "Bajaron", "Resultado"]);
       if (!nr) NR.poner(["No se pudo revisar con el GPS"]);
@@ -3691,6 +3781,7 @@
     inf.error = null;
     inf.cargando = true;
     inf.progreso = 0;
+    var turno = inf.turno = (inf.turno || 0) + 1;
     $("infExcel").disabled = true;
     pintarInforme();
     try {
@@ -3703,23 +3794,26 @@
         return client.from("v_tarjeta_viajes").select(CAMPOS_VIAJE).gte("dia", desde).lte("dia", hasta)
           .order("dia").order("interno").order("hora_salida").order("clave");
       }, function (cuantos) {
+        if (turno !== inf.turno) return;
         inf.progreso = cuantos;
         pintarInforme();
       });
       var porBus = await bases;
       var lista = await estados;
-      if (inf.desde !== desde || inf.hasta !== hasta) return;
+      if (turno !== inf.turno) return;
       ponerBases(filas, porBus);
       inf.estados = lista;
       inf.porBus = porBus;
       inf.conBases = !!porBus;
       inf.filas = filas;
     } catch (err) {
-      inf.error = err;
+      if (turno === inf.turno) inf.error = err;
     } finally {
-      inf.cargando = false;
-      $("infExcel").disabled = !inf.filas || !inf.filas.length;
-      pintarInforme();
+      if (turno === inf.turno) {
+        inf.cargando = false;
+        $("infExcel").disabled = !inf.filas || !inf.filas.length;
+        pintarInforme();
+      }
     }
   }
 
@@ -3735,7 +3829,7 @@
       return;
     }
     if (!inf.filas) {
-      cuerpo.innerHTML = '<p class="vacio">Escoja las fechas y cómo agrupar, y toque Consultar.<br>' +
+      cuerpo.innerHTML = '<p class="vacio">Escoja las fechas y cómo agrupar: el informe sale solo.<br>' +
         "Por conductor sale primero el que más plata dice de menos frente al sensor.</p>";
       return;
     }
@@ -3987,12 +4081,20 @@
     window.addEventListener("hashchange", enrutar);
 
     // Día
-    $("diaFecha").addEventListener("change", function () { if (esFecha(this.value)) location.hash = "#/dia/" + this.value; });
+    alCambiarFechas(["diaFecha"], function () { location.hash = "#/dia/" + $("diaFecha").value; });
     $("diaAntes").addEventListener("click", function () { location.hash = "#/dia/" + sumarDias(state.dia.fecha, -1); });
     $("diaDespues").addEventListener("click", function () { location.hash = "#/dia/" + sumarDias(state.dia.fecha, 1); });
     $("diaHoy").addEventListener("click", function () { location.hash = "#/dia/" + diaDeHoy(); });
     $("diaActualizar").addEventListener("click", function () { cargarDia(); });
     $("diaExcel").addEventListener("click", excelViajeAViaje);
+
+    // Por base
+    alCambiarFechas(["basesFecha"], function () { location.hash = "#/bases/" + $("basesFecha").value; });
+    $("basesAntes").addEventListener("click", function () { location.hash = "#/bases/" + sumarDias(state.dia.fecha, -1); });
+    $("basesDespues").addEventListener("click", function () { location.hash = "#/bases/" + sumarDias(state.dia.fecha, 1); });
+    $("basesHoy").addEventListener("click", function () { location.hash = "#/bases/" + diaDeHoy(); });
+    $("basesActualizar").addEventListener("click", function () { cargarDia(); });
+
     $("diaBuscar").addEventListener("input", function () { state.dia.buscar = this.value; pintarDia(); });
     $("diaRuta").addEventListener("change", function () { state.dia.ruta = this.value; pintarDia(); });
     $("diaBase").addEventListener("change", function () {
@@ -4033,11 +4135,22 @@
         location.hash = destino;
       }
     });
+    alCambiarFechas(["busFecha"], function () { if ($("busNumero").value.trim()) $("busForm").requestSubmit(); });
     $("busExcel").addEventListener("click", excelBus);
     $("busImprimir").addEventListener("click", function () { window.print(); });
 
     // Informes
     $("infForm").addEventListener("submit", consultarInforme);
+    alCambiarFechas(["infDesde", "infHasta"], function () {
+      if ($("infDesde").value <= $("infHasta").value) consultarInforme();     // si la de inicio quedó después, espera la otra
+    });
+    $("infPor").addEventListener("change", function () {
+      var inf = state.inf;
+      if (!inf.filas || inf.cargando || inf.desde !== $("infDesde").value || inf.hasta !== $("infHasta").value) return;
+      inf.por = this.value;
+      inf.orden = { campo: inf.por === "conductor" ? "difPlata" : "clave", desc: false };
+      pintarInforme();
+    });
     $("infBase").addEventListener("change", function () {
       state.inf.base = state.dia.base = this.value;
       guardarBase(this.value);
@@ -4046,7 +4159,7 @@
     $("infExcel").addEventListener("click", excelInforme);
 
     // Personal de la empresa (antes Gestores)
-    $("gesFecha").addEventListener("change", function () { if (esFecha(this.value)) location.hash = "#/gestores/" + this.value; });
+    alCambiarFechas(["gesFecha"], function () { location.hash = "#/gestores/" + $("gesFecha").value; });
     $("gesAntes").addEventListener("click", function () { location.hash = "#/gestores/" + sumarDias(state.ges.fecha, -1); });
     $("gesDespues").addEventListener("click", function () { location.hash = "#/gestores/" + sumarDias(state.ges.fecha, 1); });
     $("gesHoy").addEventListener("click", function () { location.hash = "#/gestores/" + diaDeHoy(); });
@@ -4061,6 +4174,9 @@
       if (location.hash === nuevo) { state.nov.lista = null; pintarNovedades(); cargarNovedades(); }
       else location.hash = nuevo;
     });
+    alCambiarFechas(["novDesde", "novHasta"], function () {
+      if ($("novDesde").value <= $("novHasta").value) location.hash = "#/novedades/" + $("novDesde").value + "/" + $("novHasta").value;
+    });
     $("novHoy").addEventListener("click", function () { var h = diaDeHoy(); location.hash = "#/novedades/" + h + "/" + h; });
     $("novTipo").addEventListener("change", function () { state.nov.tipo = this.value; pintarNovedades(); });
 
@@ -4072,6 +4188,9 @@
       var nuevo = "#/movilidad/" + desde + "/" + hasta;
       if (location.hash === nuevo) { state.mov.filas = null; pintarMovilidad(); cargarMovilidad(); }
       else location.hash = nuevo;
+    });
+    alCambiarFechas(["movDesde", "movHasta"], function () {
+      if ($("movDesde").value <= $("movHasta").value) location.hash = "#/movilidad/" + $("movDesde").value + "/" + $("movHasta").value;
     });
     $("movExcel").addEventListener("click", excelMovilidad);
     // Los filtros de la Base de datos, como en 700control
@@ -4091,13 +4210,6 @@
     $("movCuerpo").addEventListener("toggle", function (ev) {
       if (ev.target.id === "movResumen") state.mov.resumenAbierto = ev.target.open;
     }, true);
-    $("movNoRealizados").addEventListener("toggle", function (ev) {
-      if (ev.target.id === "movNoRealizadosDet") state.mov.noRealizadosAbierto = ev.target.open;
-    }, true);
-    $("movNoRealizados").addEventListener("click", clicNoRealizados);
-    $("movNoRealizados").addEventListener("keydown", function (ev) {
-      if ((ev.key === "Enter" || ev.key === " ") && ev.target.closest("[data-nr-dia],[data-nr-bus]")) { ev.preventDefault(); clicNoRealizados(ev); }
-    });
 
     // Clics dentro de las tablas y la tarjeta
     document.addEventListener("click", function (ev) {
@@ -4140,10 +4252,11 @@
         return pintarBus();
       }
       if ((el = t.closest("tr[data-base]"))) {
-        var cual = el.getAttribute("data-base");
-        state.dia.base = state.inf.base = cual && cual === state.dia.base ? "" : cual;     // la misma otra vez: todas
+        state.dia.base = state.inf.base = el.getAttribute("data-base");     // "Todas las bases": vacío
         guardarBase(state.dia.base);
-        return pintarDia();
+        location.hash = "#/dia/" + state.dia.fecha;
+        window.scrollTo(0, 0);
+        return;
       }
       if ((el = t.closest("tr[data-bus]"))) {
         location.hash = "#/bus/" + encodeURIComponent(el.getAttribute("data-bus")) + "/" + (el.getAttribute("data-fecha") || state.dia.fecha);
@@ -4170,9 +4283,9 @@
     });
     $("hojaCerrar").addEventListener("click", cerrarHoja);
 
-    // El día de hoy se vuelve a pedir solo cada 2 minutos mientras se ve.
+    // El día de hoy se vuelve a pedir solo cada 2 minutos mientras se ve (en el Día o en Por base).
     setInterval(function () {
-      if (state.user && state.vista === "dia" && !document.hidden && state.dia.fecha === diaDeHoy() && !state.dia.cargando) cargarDia();
+      if (state.user && (state.vista === "dia" || state.vista === "bases") && !document.hidden && state.dia.fecha === diaDeHoy() && !state.dia.cargando) cargarDia();
     }, cfg.REFRESCO_MS);
 
     client.auth.getSession().then(function (r) {

@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./css/control.css?v=0.13.0">
+  <link rel="stylesheet" href="./css/control.css?v=0.14.4">
 </head>
 <body>
 
@@ -50,6 +50,7 @@
     <p class="marca"><span class="marca-punto"></span>Combuses <b>Control</b></p>
     <nav class="pestanas" aria-label="Secciones">
       <a href="#/dia" data-pestana="dia">Día</a>
+      <a href="#/bases" data-pestana="bases">Por base</a>
       <a href="#/bus" data-pestana="bus">Tarjeta del bus</a>
       <a href="#/informes" data-pestana="informes">Informes</a>
       <a href="#/movilidad" data-pestana="movilidad">Movilidad</a>
@@ -86,7 +87,6 @@
       <div id="diaTotales" class="totales"></div>
       <div id="diaAvisos"></div>
       <div id="diaSinLlenar"></div>
-      <div id="diaBases" class="bases"></div>
       <div class="filtros">
         <input id="diaBuscar" type="search" placeholder="Buscar bus, placa o conductor" aria-label="Buscar">
         <div id="diaFiltros" class="chips-filtro" role="group" aria-label="Mostrar">
@@ -96,12 +96,33 @@
           <button type="button" data-filtro="revisar" aria-pressed="false">Por revisar</button>
           <button type="button" data-filtro="falta" aria-pressed="false">Sin llenar</button>
           <button type="button" data-filtro="sin_despacho" aria-pressed="false">Sin despacho</button>
+          <button type="button" data-filtro="personal" aria-pressed="false">Personal de la empresa</button>
+          <button type="button" data-filtro="sin_inicio" aria-pressed="false">Sin inicio de labores</button>
         </div>
         <select id="diaBase" aria-label="Base" hidden><option value="">Todas las bases</option></select>
         <select id="diaRuta" aria-label="Ruta"><option value="">Todas las rutas</option></select>
       </div>
       <div id="diaTabla" class="tabla-caja"></div>
       <p id="diaPie" class="pie"></p>
+    </section>
+
+    <!-- ---- Por base: los totales de cada base en el día (tocar una abre el Día solo con esa base) ---- -->
+    <section id="vistaBases" class="vista" hidden>
+      <div class="cabeza">
+        <div>
+          <h1>Por base</h1>
+          <p id="basesSub" class="sub"></p>
+        </div>
+        <div class="controles">
+          <button id="basesAntes" class="btn btn-sutil btn-cuadro" type="button" title="Día anterior" aria-label="Día anterior">‹</button>
+          <input id="basesFecha" type="date" aria-label="Día">
+          <button id="basesDespues" class="btn btn-sutil btn-cuadro" type="button" title="Día siguiente" aria-label="Día siguiente">›</button>
+          <button id="basesHoy" class="btn btn-sutil" type="button">Hoy</button>
+          <button id="basesActualizar" class="btn" type="button">Actualizar</button>
+        </div>
+      </div>
+      <div id="diaBases" class="bases"></div>
+      <p id="basesPie" class="pie"></p>
     </section>
 
     <!-- ---- La tarjeta de un bus ---- -->
@@ -217,27 +238,14 @@
           <p>También recibe los archivos <em>LiquidacionUsosTransporteMifare</em> tal como llegan, sueltos o en el .zip. Cada uno va al día de su nombre,
             y la placa se pasa a número de bus con las placas de Sonar.</p>
 
-          <h3>3. Despachos no realizados</h3>
-          <p>Arriba de la tabla, en <strong>Despachos no realizados</strong>, sale una tabla con un renglón por bus y una columna por día: en cada cuadro,
-            cuántos despachos no se hicieron y en qué sentido (<strong>↑</strong> sube al aeropuerto, <strong>↓</strong> baja). Toque un número para ver abajo
-            esos despachos (la hora, el itinerario y los km); un bus, para ver los suyos; un día, para ver los de ese día. La lista de abajo va separada por día.
-            El sentido:
-            <strong>sube al aeropuerto</strong> o <strong>baja del aeropuerto</strong> (lo dice el itinerario: "Aeropuerto-…" baja, "…-Aeropuerto" sube).</p>
-          <ul>
-            <li>Un despacho <strong>no se realizó</strong> cuando Sonar lo canceló <strong>y</strong> el GPS muestra que el bus anduvo menos de la mitad de lo normal de esa ruta.
-              Ejemplo: el 703 del 1 de octubre, viaje 3, despachado a las 10:32 a. m.: anduvo 0 km en 1 minuto, nadie subió, y a las 10:35 lo despacharon otra vez.</li>
-            <li>Que Sonar lo cancele no basta: la mayoría de los cancelados sí hicieron la ruta, muchos con gente.</li>
-            <li>Los cancelados que no tienen recorrido GPS van al final, en gris: de esos no se sabe.</li>
-            <li>Siguen contando en <strong>Viajes realizados</strong> de la movilidad: aquí solo se ven. Con el filtro de día o de vehículos, la lista también se filtra.</li>
-            <li>El Excel los trae en las hojas <em>Despachos no realizados</em> (la lista) y <em>No realizados por bus y día</em> (la tabla).</li>
-          </ul>
-
-          <h3>4. Ajustes y Excel</h3>
+          <h3>3. Ajustes y Excel</h3>
           <ul>
             <li><strong>+ Ajuste</strong> en el renglón del bus (solo despachadores): cuántas personas y el motivo (Taller, Administrativo, Despachador, u Otro con una nota).
               No se borra: se anula diciendo el porqué, y queda quién y cuándo.</li>
             <li><strong>Descargar Excel:</strong> la hoja Base de datos igual a la de Movilidad 2026, con las fórmulas de Ingresos totales, Total salidas y Dif.
-              Si cambia un número en el Excel, se recalcula.</li>
+              Si cambia un número en el Excel, se recalcula. Trae también las hojas <em>Despachos no realizados</em> y
+              <em>No realizados por bus y día</em>: los que Sonar canceló y el GPS muestra que el bus anduvo menos de la mitad de lo normal
+              de esa ruta (siguen contando en Viajes realizados).</li>
           </ul>
         </div>
       </details>
@@ -252,7 +260,6 @@
         <input id="movMifareArchivo" type="file" accept=".xlsx,.xls,.zip" multiple hidden>
       </form>
       <div id="movCuerpo"></div>
-      <div id="movNoRealizados"></div>
       <div id="movFiltros" class="filtros" hidden>
         <select id="movDia" aria-label="Día"><option value="">Todos los días</option></select>
         <select id="movBase" aria-label="Base"><option value="">Todas las bases</option></select>
@@ -333,7 +340,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="./js/control-config.js?v=0.13.0"></script>
-<script src="./js/control.js?v=0.13.0"></script>
+<script src="./js/control-config.js?v=0.14.4"></script>
+<script src="./js/control.js?v=0.14.4"></script>
 </body>
 </html>
