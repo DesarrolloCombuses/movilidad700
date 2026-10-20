@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./css/control.css?v=0.12.0">
+  <link rel="stylesheet" href="./css/control.css?v=0.13.0">
 </head>
 <body>
 
@@ -85,6 +85,7 @@
       </div>
       <div id="diaTotales" class="totales"></div>
       <div id="diaAvisos"></div>
+      <div id="diaSinLlenar"></div>
       <div id="diaBases" class="bases"></div>
       <div class="filtros">
         <input id="diaBuscar" type="search" placeholder="Buscar bus, placa o conductor" aria-label="Buscar">
@@ -93,7 +94,7 @@
           <button type="button" data-filtro="aviso" aria-pressed="false">Con aviso</button>
           <button type="button" data-filtro="no_cuadra" aria-pressed="false">No cuadran</button>
           <button type="button" data-filtro="revisar" aria-pressed="false">Por revisar</button>
-          <button type="button" data-filtro="falta" aria-pressed="false">Falta algo</button>
+          <button type="button" data-filtro="falta" aria-pressed="false">Sin llenar</button>
           <button type="button" data-filtro="sin_despacho" aria-pressed="false">Sin despacho</button>
         </div>
         <select id="diaBase" aria-label="Base" hidden><option value="">Todas las bases</option></select>
@@ -332,7 +333,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="./js/control-config.js?v=0.12.0"></script>
-<script src="./js/control.js?v=0.12.0"></script>
+<script src="./js/control-config.js?v=0.13.0"></script>
+<script src="./js/control.js?v=0.13.0"></script>
 </body>
 </html>

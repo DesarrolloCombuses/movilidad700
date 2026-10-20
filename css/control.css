@@ -134,6 +134,18 @@ textarea { min-height: 70px; resize: vertical; width: 100%; }
 /* avisos de los buses (dejó de reportar, sensor sin datos...) */
 #diaAvisos:empty { display: none; }
 #diaAvisos { margin-bottom: 14px; }
+#diaSinLlenar:empty { display: none; }
+#diaSinLlenar { margin-bottom: 14px; }
+.avisos-buses[data-tono="revisa"] { border-color: #f0d9a0; background: var(--warn-soft); }
+.avisos-buses[data-tono="revisa"] .avisos-cabeza h2 { color: var(--warn-ink); }
+.tabla-sin-llenar { width: 100%; margin-top: 10px; border-collapse: collapse; font-size: 13.5px; background: transparent; }
+.tabla-sin-llenar th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--warn-ink); padding: 4px 10px 6px 0; border-bottom: 1px solid #f0d9a0; }
+.tabla-sin-llenar td { padding: 7px 10px 7px 0; border-bottom: 1px solid #f5e6bf; vertical-align: top; }
+.tabla-sin-llenar tr:last-child td { border-bottom: 0; }
+.tabla-sin-llenar .n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 700; }
+.tabla-sin-llenar td.falta { color: var(--ink-2); white-space: nowrap; }
+.tabla-sin-llenar a { text-decoration: none; }
+.sin-llenar-pie { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 13px; color: var(--ink-2); }
 .avisos-buses { padding: 12px 16px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
 .avisos-buses[data-tono="mal"] { border-color: #f1b4ad; background: var(--danger-soft); }
 .avisos-buses[data-tono="bien"] { background: var(--soft); border-color: transparent; box-shadow: none; }

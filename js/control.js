@@ -76,6 +76,7 @@
     dia: {
       fecha: null, filas: null, error: null, cargando: false, cargadoEn: null, conBases: false,
       filtro: "todos", buscar: "", ruta: "", base: baseGuardada(), orden: { campo: "clave", desc: false },
+      verTodosSinLlenar: false,
     },
     bus: {
       interno: null, fecha: null, filas: null, extra: {}, historial: null, danos: [], diaManual: null,
@@ -440,7 +441,7 @@
       conductor: 0, plataConductor: 0, escribio: 0, comparados: 0,
       faltaCivica: 0, faltaPasajeros: 0, faltaTiquetes: 0,
       dif: 0, difPlata: 0, noCuadran: 0, civicas: 0, tiquetes: 0,
-      revisarCivica: 0, danos: 0, enCurso: 0, corregidos: 0,
+      revisarCivica: 0, danos: 0, enCurso: 0, corregidos: 0, sinLlenar: 0,
       estadoBus: null, avisosBus: 0,     // cómo está el bus (tarjeta_buses_dia) / cuántos buses con aviso
     };
   }
@@ -473,6 +474,7 @@
     if (f.estado_civica === "bajo" || f.estado_civica === "salto") r.revisarCivica++;
     if (f.dano_estado === "reportado") r.danos++;
     if (f.lectura_corregida || f.tiquetes_corregidos || f.pasajeros_conductor_corregidos) r.corregidos++;
+    if (sinLlenar(f)) r.sinLlenar++;
     // La diferencia solo cuenta cuando el viaje ya llegó: en camino el sensor todavía puede contar.
     if (f.estado_calculo === "en_curso") {
       r.enCurso++;
@@ -483,6 +485,17 @@
       if (n(f.diferencia_con_sensor) !== 0) r.noCuadran++;
     }
   }
+
+  // Lo que el conductor tiene que escribir en Mi tarjeta del portal y no escribió.
+  function faltaEnViaje(f) {
+    var falta = [];
+    if (f.civica_lectura == null) falta.push("cívica");
+    if (f.pasajeros_conductor == null) falta.push("pasajeros");
+    if (f.tiquetes_escaneados == null) falta.push("tiquetes");
+    return falta;
+  }
+  // Sin llenar: el viaje ya llegó y al conductor le falta algo. Los que van en camino todavía no cuentan.
+  function sinLlenar(f) { return f.estado_calculo !== "en_curso" && faltaEnViaje(f).length > 0; }
 
   function resumir(filas, claveDe) {
     var grupos = {};
@@ -699,7 +712,7 @@
     var f = d.filtro;
     if (f === "no_cuadra" && !r.noCuadran) return false;
     if (f === "revisar" && !(r.danos || r.revisarCivica)) return false;
-    if (f === "falta" && !(r.faltaCivica || r.faltaPasajeros || r.faltaTiquetes)) return false;
+    if (f === "falta" && !r.sinLlenar) return false;
     if (f === "sin_despacho" && !r.sd) return false;
     if (f === "aviso" && !tieneAvisos(r.estadoBus)) return false;
     if (d.ruta && r.rutas.indexOf(d.ruta) < 0) return false;
@@ -720,6 +733,7 @@
       totales.innerHTML = "";
       $("diaBases").innerHTML = "";
       $("diaAvisos").innerHTML = "";
+      $("diaSinLlenar").innerHTML = "";
       tabla.innerHTML = d.error ? cajaError("No se pudo traer el día: " + textoError(d.error), "recargar-dia")
         : '<p class="cargando">Trayendo las tarjetas del día…</p>';
       $("diaPie").textContent = "";
@@ -742,6 +756,7 @@
     });
     buses.forEach(function (r) { r.estadoBus = d.estados ? d.estados[r.clave] || null : null; });
     pintarAvisos(d, buses, base);
+    pintarSinLlenar(d, filas, base);
     var todo = nuevoResumen("todo");
     filas.forEach(function (f) { sumarViaje(todo, f); });
     var conProblemas = buses.filter(function (r) { return r.danos || r.noCuadran || r.revisarCivica; }).length;
@@ -873,6 +888,72 @@
       }).join("") + "</ul>";
     }
     caja.innerHTML = html + "</div>";
+  }
+
+  // Qué buses tienen viajes que ya llegaron y el conductor no llenó en el portal (cívica, pasajeros o
+  // tiquetes), y de quién son: pedido del usuario el 20-oct-2026 ("que identifique qué vehículos los
+  // conductores no han llenado los viajes").
+  function pintarSinLlenar(d, filas, base) {
+    var caja = $("diaSinLlenar");
+    var llegaron = filas.filter(function (f) { return f.estado_calculo !== "en_curso"; });
+    if (!llegaron.length) {
+      caja.innerHTML = "";
+      return;
+    }
+    var porBus = {}, conductores = {}, total = 0;
+    llegaron.forEach(function (f) {
+      var b = porBus[f.interno] || (porBus[f.interno] = { interno: f.interno, viajes: 0, sinLlenar: 0, falta: {}, quienes: {} });
+      b.viajes++;
+      var falta = faltaEnViaje(f);
+      if (!falta.length) return;
+      total++;
+      b.sinLlenar++;
+      falta.forEach(function (x) { b.falta[x] = (b.falta[x] || 0) + 1; });
+      var quien = capitalizar(f.conductor || "") || "Sin conductor";
+      b.quienes[quien] = (b.quienes[quien] || 0) + 1;
+      conductores[quien] = true;
+    });
+    var buses = Object.keys(porBus).map(function (k) { return porBus[k]; }).filter(function (b) { return b.sinLlenar; })
+      .sort(function (a, b) { return b.sinLlenar - a.sinLlenar || compararInternos(a.interno, b.interno); });
+    var deBase = base ? " · " + esc(base) : "";
+    if (!buses.length) {
+      caja.innerHTML = '<div class="avisos-buses" data-tono="bien"><div class="avisos-cabeza"><h2>Los conductores llenaron ' +
+        "todos los viajes" + deBase + "</h2><span>" + llegaron.length + (llegaron.length === 1 ? " viaje" : " viajes") +
+        " que ya llegaron, con la cívica, los pasajeros y los tiquetes</span></div></div>";
+      return;
+    }
+    var nConductores = Object.keys(conductores).length;
+    var PRIMEROS = 8;
+    var mostrar = d.verTodosSinLlenar ? buses : buses.slice(0, PRIMEROS);
+    caja.innerHTML = '<div class="avisos-buses sin-llenar" data-tono="revisa"><div class="avisos-cabeza"><h2>' +
+      (buses.length === 1 ? "1 bus con viajes sin llenar" : buses.length + " buses con viajes sin llenar") + deBase + "</h2>" +
+      "<span>" + total + " de " + llegaron.length + " viajes que ya llegaron no tienen todo lo que escribe el conductor · " +
+      (nConductores === 1 ? "1 conductor" : nConductores + " conductores") + "</span></div>" +
+      '<div class="tabla-caja"><table class="tabla-sin-llenar"><thead><tr><th>Bus</th><th>Conductor (viajes que le faltan)</th>' +
+      '<th class="n">Sin llenar</th><th>Qué falta</th></tr></thead><tbody>' + mostrar.map(function (b) {
+        var quienes = Object.keys(b.quienes).sort(function (x, y) { return b.quienes[y] - b.quienes[x] || x.localeCompare(y); })
+          .map(function (q) { return esc(q) + " (" + b.quienes[q] + ")"; }).join(" · ");
+        var falta = ["cívica", "pasajeros", "tiquetes"].filter(function (x) { return b.falta[x]; })
+          .map(function (x) { return x + " " + b.falta[x]; }).join(" · ");
+        return '<tr><td><a class="bus-num" href="#/bus/' + encodeURIComponent(b.interno) + "/" + d.fecha + '">' + esc(b.interno) + "</a></td>" +
+          "<td>" + quienes + "</td>" +
+          '<td class="n">' + b.sinLlenar + " de " + b.viajes + "</td>" +
+          '<td class="falta">' + esc(falta) + "</td></tr>";
+      }).join("") + "</tbody></table></div>" +
+      '<div class="sin-llenar-pie">' +
+        (buses.length > PRIMEROS ? '<button type="button" class="btn btn-sutil" data-accion="todos-sin-llenar">' +
+          (d.verTodosSinLlenar ? "Ver solo los " + PRIMEROS + " primeros" : "Ver los " + buses.length + " buses") + "</button>" : "") +
+        '<button type="button" class="btn btn-sutil" data-accion="ver-sin-llenar">Filtrar la lista de abajo</button>' +
+        "<span>Primero los que más viajes tienen sin llenar. Los viajes en camino no cuentan.</span></div></div>";
+  }
+
+  function verSinLlenar() {
+    state.dia.filtro = "falta";
+    Array.prototype.forEach.call($("diaFiltros").querySelectorAll("[data-filtro]"), function (x) {
+      x.setAttribute("aria-pressed", String(x.getAttribute("data-filtro") === "falta"));
+    });
+    pintarDia();
+    $("diaTabla").scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   // ================================================================ LA TARJETA DE UN BUS
@@ -3918,6 +3999,13 @@
       state.dia.base = state.inf.base = this.value;
       guardarBase(this.value);
       pintarDia();
+    });
+    $("diaSinLlenar").addEventListener("click", function (ev) {
+      if (ev.target.closest('[data-accion="ver-sin-llenar"]')) verSinLlenar();
+      if (ev.target.closest('[data-accion="todos-sin-llenar"]')) {
+        state.dia.verTodosSinLlenar = !state.dia.verTodosSinLlenar;
+        pintarDia();
+      }
     });
     $("diaFiltros").addEventListener("click", function (ev) {
       var b = ev.target.closest("[data-filtro]");

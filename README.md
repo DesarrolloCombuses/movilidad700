@@ -133,6 +133,15 @@ Hasta agosto, la "Base de datos" de Movilidad 2026 se armaba con la plantilla [7
 
 Un aviso que se arregla queda en el historial del día ("Tuvo: … visto de 10:05 a 11:40"). Si el programa lleva 15 minutos sin revisar los buses de hoy, el Día lo dice: puede estar apagado o sin internet.
 
+### Viajes sin llenar (v0.13.0)
+
+Debajo de los avisos, el Día dice **qué buses tienen viajes que el conductor no llenó** en Mi tarjeta del
+portal: un viaje que ya llegó y al que le falta la cívica, los pasajeros o los tiquetes. Los viajes en camino
+no cuentan. Por cada bus salen los conductores con cuántos viajes le faltan a cada uno (*"Sanchez … (6) ·
+Quezada … (5)"*), *"11 de 11"* y qué falta. Van primero los que más tienen sin llenar; se ven los 8 primeros y
+"Ver los N buses" muestra el resto. "Filtrar la lista de abajo" deja en la tabla solo esos buses (es el mismo
+filtro "Sin llenar", que antes se llamaba "Falta algo" y contaba también los viajes en camino).
+
 ### El día de la tarjeta
 
 Es el día de la empresa: **de 2:30 a. m. a 2:30 a. m. del día siguiente**. Un viaje va al día de la hora de su
