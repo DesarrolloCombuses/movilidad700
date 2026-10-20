@@ -52,8 +52,11 @@
 
   var ESTADO_CIVICA = {
     ok: ["ok", "Cuadra"],
-    pendiente_cierre: ["", "Se completa en el próximo despacho"],
     falta_lectura: ["", "Falta la lectura"],
+    sin_lectura_anterior: ["", "Sin lectura anterior del bus"],
+    falta_lectura_anterior: ["", "Falta la del viaje anterior"],
+    // los de antes de la v12 (cívicas = lectura siguiente - la suya), por si la base todavía no cambió
+    pendiente_cierre: ["", "Se completa en el próximo despacho"],
     falta_lectura_siguiente: ["", "Falta la del viaje siguiente"],
     dano_por_revisar: ["revisa", "Daño por revisar"],
     bajo: ["mal", "El número bajó"],
@@ -490,10 +493,11 @@
   // ================================================================ la plata del conductor, repartida
   // Igual que Mi tarjeta del portal del conductor (v1.16.1): los pasajeros que dice el conductor (máximo 19,
   // el cupo del bus) se reparten entre los que pagaron con tiquete, con la cívica y en efectivo, más el personal
-  // de la empresa (va en los pasajeros, no paga). Los tres valen el pasaje. Las cívicas de un viaje son la
-  // lectura del despacho siguiente menos la suya (civicas de la vista). Ej.: 19 pasajeros, 4 tiquetes y 1 cívica
-  // a $20.000 = $380.000: $80.000 en tiquetes, $20.000 en cívica y $280.000 en efectivo (14). Mientras no hay
-  // lectura siguiente, lo que no es tiquete va junto: "cívica o efectivo".
+  // de la empresa (va en los pasajeros, no paga). Los tres valen el pasaje. Las cívicas de un viaje son su
+  // lectura menos la del despacho anterior del bus (civicas de la vista, v12 del 20-oct-2026: el conductor la
+  // escribe ya hecho el viaje; si se repite, 0). Ej.: 19 pasajeros, 4 tiquetes y 1 cívica a $20.000 = $380.000:
+  // $80.000 en tiquetes, $20.000 en cívica y $280.000 en efectivo (14). Mientras falta la lectura del viaje o la
+  // del anterior, lo que no es tiquete va junto: "cívica o efectivo".
   var CUPO = 19;
 
   function civicasDe(f) { return f.civicas == null || n(f.civicas) < 0 ? null : n(f.civicas); }
@@ -560,7 +564,7 @@
     }
     if (r.personal) partes.push(r.personal + " del personal (no se cobra)");
     return r.pasajeros + " pasajeros = " + partes.join(" + ") +
-      (r.civicas == null ? ". Las cívicas se saben en el próximo despacho." : ".");
+      (r.civicas == null ? ". Cívica y efectivo se separan con la lectura del validador de este viaje y la del anterior." : ".");
   }
 
   // ================================================================ resumen de un grupo de viajes
@@ -772,7 +776,7 @@
   function textoRepartoTotal(r) {
     if (!r.conReparto) return r.escribio ? "faltan los tiquetes para repartir" : "todavía no han escrito";
     return "tiquetes " + pesos(r.enTiquetes) + " · cívica " + pesos(r.enCivica) +
-      (r.porSeparar ? " · " + pesos(r.porSeparar) + " cívica o efectivo, se separa en el próximo despacho" : "") +
+      (r.porSeparar ? " · " + pesos(r.porSeparar) + " cívica o efectivo, sin separar (faltan lecturas de la cívica)" : "") +
       (r.sinRepartir ? " · " + pesos(r.sinRepartir) + " sin repartir (faltan tiquetes)" : "") +
       (r.cuentaMal ? " · " + (r.cuentaMal === 1 ? "1 viaje" : r.cuentaMal + " viajes") + " con la cuenta mal" : "");
   }
@@ -1904,7 +1908,8 @@
       };
       html += linea("tiquetes", rp.tiquetes);
       if (rp.civicas == null) {
-        html += linea("cívica o efectivo", rp.sinTiquete) + '<span class="menor">se separa en el próximo despacho</span>';
+        html += linea("cívica o efectivo", rp.sinTiquete) + '<span class="menor">' +
+          (f.civica_lectura == null ? "falta la lectura de la cívica" : "falta la lectura del viaje anterior") + "</span>";
       } else {
         html += linea("cívica", rp.civicas) + linea("efectivo", rp.efectivo, "reparto-efectivo");
       }
@@ -2214,7 +2219,8 @@
 
   // La cuenta del viaje con el número que va escribiendo, como en Mi tarjeta del portal. Pasajeros y tiquetes:
   // más de 19, o más tiquetes y cívicas que pasajeros, no deja guardar. La cívica cambia las cívicas de este
-  // viaje y del anterior: se dice cómo quedan, y si no cuadran solo avisa (el número del validador es el real).
+  // viaje (su lectura - la del anterior) y las del siguiente (la suya - esta): se dice cómo quedan, y si no
+  // cuadran solo avisa (el número del validador es el real).
   function cuentaCorreccion(tipo, f, texto) {
     var valor = texto === "" || texto == null ? null : Number(texto);
     var lineas = [], avisos = [], mal = "";
@@ -2242,9 +2248,11 @@
       if (r.sobran) avisos.push(dice + " y no cuadra: " + textoSobran(r) + ".");
       else lineas.push(dice + ": " + textoCuenta(r));
     };
-    if (sig && sig.civica_lectura != null && n(sig.civica_lectura) >= valor) cuenta(f, n(sig.civica_lectura) - valor, "Este viaje");
-    if (ant && ant.civica_lectura != null && valor >= n(ant.civica_lectura)) {
-      cuenta(ant, valor - n(ant.civica_lectura), ant.sin_despacho ? "El viaje anterior (sin despacho)" : "El viaje anterior (" + ant.viaje + ")");
+    // el primer viaje del día: la lectura anterior es la del último despacho del bus (lectura_anterior de la vista)
+    var lecAnt = ant ? ant.civica_lectura : f.lectura_anterior;
+    if (lecAnt != null && valor >= n(lecAnt)) cuenta(f, valor - n(lecAnt), "Este viaje");
+    if (sig && sig.civica_lectura != null && n(sig.civica_lectura) >= valor) {
+      cuenta(sig, n(sig.civica_lectura) - valor, sig.sin_despacho ? "El viaje siguiente (sin despacho)" : "El viaje siguiente (" + sig.viaje + ")");
     }
     return { lineas: lineas, avisos: avisos, mal: mal };
   }

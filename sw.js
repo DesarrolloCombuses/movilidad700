@@ -19,7 +19,7 @@
 // Igual a VERSION de js/control-config.js. No se cambia a mano: lo hace
 // nueva-version.ps1 en todos los sitios a la vez. Que este archivo cambie es
 // lo que avisa a los PC de que hay una versión nueva.
-const VERSION = "v0.16.0";
+const VERSION = "v0.17.0";
 const CACHE_APP = "control-app-" + VERSION;
 const CACHE_CDN = "control-cdn-" + VERSION;
 

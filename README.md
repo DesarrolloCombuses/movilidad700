@@ -236,6 +236,15 @@ siguiente, lo que no es tiquete sale como *"cívica o efectivo"* (se separa en e
 - **Excel** de la tarjeta del bus y de Informes: columnas *$ tiquetes*, *$ cívica*, *$ efectivo*, *$ cívica o
   efectivo (sin separar)* y la cuenta mal.
 
+### La cívica de cada viaje: su lectura menos la del anterior (v0.17.0)
+
+Desde el 20-oct-2026 (pedido del usuario, bus 710: "cuando se repite el validador no debe contar, solo cuando cambia
+positivamente") las cívicas de un viaje son su lectura menos la del despacho anterior del bus (vista
+`v_tarjeta_viajes` v12, `civica_lectura_anterior.sql`): el conductor escribe la lectura ya hecho el viaje. Ej.: viaje
+1 en 2773, viaje 2 en 2773, viaje 3 en 2774 → el 2 tuvo 0 y el 3 tuvo 1. Estados nuevos: "Falta la del viaje
+anterior" y "Sin lectura anterior del bus" (ya no "Se completa en el próximo despacho"). Al corregir una cívica, la
+cuenta en vivo dice cómo quedan este viaje y el siguiente. Igual que el portal del conductor v1.18.0.
+
 ### El día de la tarjeta
 
 Es el día de la empresa: **de 2:30 a. m. a 2:30 a. m. del día siguiente**. Un viaje va al día de la hora de su
