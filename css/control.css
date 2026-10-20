@@ -235,6 +235,32 @@ tfoot td { background: var(--panel-2); font-weight: 800; border-top: 2px solid v
 .inicio[data-falta] { color: var(--danger); }
 .dato .inicio { margin-top: 2px; text-transform: none; letter-spacing: 0; font-size: 12.5px; color: var(--primary-strong); }
 .dato .inicio[data-falta] { color: var(--danger); }
+.inicio[data-otro] { white-space: normal; color: var(--warn-ink); }
+.dato .inicio[data-otro] { color: var(--warn-ink); }
+.dato .inicio[data-luego] { color: var(--muted); }
+.dato ul.turnos { font-weight: 600; }
+.dato ul.turnos li + li { margin-top: 4px; }
+#basesConductores { margin-top: 18px; }
+.conductores-base { margin-bottom: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.conductores-base > summary { cursor: pointer; padding: 10px 14px; }
+.conductores-base[open] > summary { border-bottom: 1px solid var(--line); }
+.conductores-base .tabla-caja { border: 0; box-shadow: none; margin: 0; }
+.tabla-conductores td { vertical-align: top; }
+/* el aviso de "cargando" encima de la pantalla */
+.cargando-modal { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgba(20, 35, 25, .28); cursor: progress; }
+.cargando-modal[hidden] { display: none; }
+.cargando-caja { display: grid; justify-items: center; gap: 8px; min-width: min(320px, 100%); max-width: 420px; padding: 22px 26px;
+  background: var(--panel); border-radius: 16px; box-shadow: 0 18px 40px rgba(0, 0, 0, .18); text-align: center; }
+.cargando-caja p { margin: 0; font-weight: 700; color: var(--ink); }
+.cargando-caja small { color: var(--muted); min-height: 1em; }
+.girando { width: 34px; height: 34px; border-radius: 50%; border: 4px solid var(--soft); border-top-color: var(--primary);
+  animation: girar .8s linear infinite; }
+@keyframes girar { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .girando { animation-duration: 2.4s; } }
+#busBase { max-width: 170px; }
+#busNumero { min-width: 96px; }
+.aviso-otro { color: var(--warn-ink); font-weight: 650; }
 .dato-ancho { grid-column: span 2; }
 .dato ul { margin: 0; padding: 0; list-style: none; font-weight: 700; }
 .dato-edit { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }

@@ -89,6 +89,9 @@ En **Día**, el botón **Excel viaje a viaje** descarga el mismo Excel que arma 
 - **Viaje a viaje:** cada vez que se abrió la puerta (hora, entradas, salidas, dirección, conductor; en verde si subió alguien) y debajo **el total del viaje** con fórmulas. Azul es normal, ámbar es sin despacho y rojo es que el sensor pasó de 19.
 - **TARJETA** viene con los pasajeros que el conductor escribió en "Mi tarjeta". Si hay un número, aunque sea 0, manda sobre el sensor en la columna **Combuses**. Se puede escribir en cualquier renglón del viaje, cambiar o borrar, y todo se recalcula.
 - **CONTEO SENSOR** ya va sin los gestores y con el tope de 19, igual que la tarjeta.
+- **CONDUCTOR REPORTA pasajeros** y **CONDUCTOR REPORTA tiquetes** (v0.15.2): en el renglón del total de cada viaje,
+  lo que el conductor reportó en el portal. Vacío si no lo ha escrito. No cambian aunque cambien la TARJETA; si Control
+  corrigió lo del conductor, el viaje lo dice. También van en el Resumen por viaje.
 - **Resumen por viaje** y **Resumen por bus**, con TODA LA FLOTA al final.
 
 No trae la hoja **"Fuera de la ruta"** ni las aperturas sin viaje (patio, taller, aseo): Supabase solo guarda cuántas fueron. Esas siguen saliendo en el Excel del programa de Python.
@@ -180,6 +183,40 @@ oficina (*oficina*).
 El cruce es por el nombre que trae Sonar contra la lista del personal (`colaboradores`). Si no es idéntico, toma el
 nombre con más palabras iguales (al menos 3) y, si empatan, el que reportó ese bus. Cuentan las marcas del día y las
 del día siguiente antes de las 2:30. Con los datos reales: 19-oct 90 de 90; 18-oct 91 de 93.
+
+### Conductores por base y el conductor programado (v0.15.0)
+
+- **Por base → Conductores por base:** de la programación del día (`v_programacion_turnos`), cada base con sus
+  conductores: bus, turno y horario, puesto, si hizo el inicio de labores (o *"Entra a las 12:00"* si su turno no ha
+  empezado) y **En Sonar**: cuántos viajes hizo el bus en ese turno y si Sonar los tiene a nombre de otro conductor.
+  Las bases con alguien sin inicio salen abiertas.
+- **Sonar con otro conductor:** si el conductor que trae Sonar no marcó, pero a esa hora el bus estaba programado para
+  otro conductor que sí hizo el inicio, no sale *Sin inicio de labores*: sale *"Sonar lo pone, pero el turno 1 es de …:
+  inicio 03:46 · oficina"* y el aviso **Sonar con otro conductor**. Ejemplo: el 756 del 20-oct salía con el
+  conductor del turno 2 (entra a las 12:00) y manejaba el del turno 1, que marcó a las 03:46. Ese día pasó en 6 buses,
+  y el 18-oct en el 735 y el 736.
+- **La tarjeta del bus** muestra la programación (cada turno con su inicio de labores).
+- **Cédula:** junto a *Sin inicio de labores* sale la cédula (de `colaboradores`), **solo para las cuentas que pueden
+  corregir**. Si el conductor no está en la lista del personal, dice *"no está en la lista del personal"*: así no
+  puede marcar (el 15-oct, 2 programados de la Base 3).
+
+### Escoger por base y por bus, y el aviso de "cargando" (v0.15.1)
+
+- **Tarjeta del bus:** dos listas, **Base** (con cuántos buses tiene) y **Bus** (solo los de esa base), más **‹ ›**
+  para el bus anterior o siguiente. Escoger un bus lo abre de una vez; escoger otra base abre su primer bus. Los buses
+  salen de la programación del día y de los que tienen viajes. La base se recuerda, como en el Día.
+- **Aviso de cargando:** mientras trae datos (Día, Por base, Tarjeta del bus, Informes, Movilidad, Personal,
+  Novedades y los Excel) sale un aviso encima de la pantalla, por ejemplo *"Trayendo la tarjeta del bus 736…"*, y no
+  deja tocar otra cosa hasta que termina. Sale si tarda más de un cuarto de segundo, nunca dura más de 90 s, y la
+  recarga sola del día (cada 2 minutos) no lo muestra. Informes dice cuántos viajes lleva.
+- **Arreglo:** si se cambiaba de bus o de día mientras el anterior todavía cargaba, la pantalla se quedaba en
+  "Trayendo…". Ahora, al terminar, trae el que se escogió.
+
+### Lo que reporta el conductor en el Excel viaje a viaje (v0.15.2)
+
+- En **Día → Excel viaje a viaje**, cada viaje trae dos casillas nuevas al lado del CONTEO SENSOR:
+  **CONDUCTOR REPORTA pasajeros** y **CONDUCTOR REPORTA tiquetes**, con lo que el conductor escribió en su tarjeta del
+  portal. Vacías si no lo ha escrito. Van también en la hoja Resumen por viaje.
 
 ### El día de la tarjeta
 

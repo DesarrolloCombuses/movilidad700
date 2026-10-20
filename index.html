@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./css/control.css?v=0.14.4">
+  <link rel="stylesheet" href="./css/control.css?v=0.15.2">
 </head>
 <body>
 
@@ -123,6 +123,7 @@
       </div>
       <div id="diaBases" class="bases"></div>
       <p id="basesPie" class="pie"></p>
+      <div id="basesConductores"></div>
     </section>
 
     <!-- ---- La tarjeta de un bus ---- -->
@@ -134,8 +135,10 @@
           <p id="busSub" class="sub"></p>
         </div>
         <form id="busForm" class="controles" novalidate>
-          <input id="busNumero" list="busLista" placeholder="Bus" inputmode="numeric" autocomplete="off" aria-label="Bus" size="6">
-          <datalist id="busLista"></datalist>
+          <select id="busBase" aria-label="Base"><option value="">Todas las bases</option></select>
+          <button id="busAntes" class="btn btn-sutil btn-cuadro" type="button" title="Bus anterior" aria-label="Bus anterior">‹</button>
+          <select id="busNumero" aria-label="Bus"><option value="">Bus…</option></select>
+          <button id="busDespues" class="btn btn-sutil btn-cuadro" type="button" title="Bus siguiente" aria-label="Bus siguiente">›</button>
           <input id="busFecha" type="date" aria-label="Día">
           <button class="btn" type="submit">Ver</button>
           <button id="busExcel" class="btn btn-sutil" type="button" disabled>Excel</button>
@@ -332,6 +335,15 @@
 
 <div id="aviso" class="aviso" role="status" hidden></div>
 
+<!-- Mientras trae datos: un aviso encima de la pantalla (pedido del usuario el 20-oct-2026) -->
+<div id="cargandoModal" class="cargando-modal" role="alertdialog" aria-modal="true" aria-labelledby="cargandoTexto" hidden>
+  <div class="cargando-caja">
+    <span class="girando" aria-hidden="true"></span>
+    <p id="cargandoTexto">Cargando…</p>
+    <small id="cargandoDetalle"></small>
+  </div>
+</div>
+
 <!-- Versión nueva publicada: se activa cuando la persona toca Actualizar -->
 <div id="nuevaVersion" class="nueva-version" role="status" hidden>
   <span id="nuevaVersionTexto">Hay una versión nueva del portal.</span>
@@ -340,7 +352,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="./js/control-config.js?v=0.14.4"></script>
-<script src="./js/control.js?v=0.14.4"></script>
+<script src="./js/control-config.js?v=0.15.2"></script>
+<script src="./js/control.js?v=0.15.2"></script>
 </body>
 </html>

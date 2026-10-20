@@ -301,6 +301,41 @@
     avisoTimer = setTimeout(function () { box.hidden = true; }, tono === "mal" ? 7000 : 3500);
   }
 
+  // ---------------------------------------------------------------- el aviso de "cargando"
+  // Mientras trae datos, un aviso encima de la pantalla para que se vea que está trabajando y no se toque otra cosa
+  // (pedido del usuario el 20-oct-2026). Sale si tarda más de un cuarto de segundo, nunca se queda pegado más de
+  // 90 s, y la recarga sola del día (cada 2 minutos) no lo muestra.
+  var cargas = {}, cargaN = 0, cargaTimer = null;
+  function empezarCarga(texto) {
+    var id = ++cargaN;
+    cargas[id] = { texto: texto, detalle: "" };
+    pintarCarga();
+    var seguro = setTimeout(terminar, 90 * 1000);
+    function terminar() { clearTimeout(seguro); delete cargas[id]; pintarCarga(); }
+    terminar.detalle = function (t) { if (cargas[id]) { cargas[id].detalle = t; pintarCarga(); } };
+    return terminar;
+  }
+  function sinCarga() {}
+  sinCarga.detalle = function () {};
+  function pintarCarga() {
+    var ids = Object.keys(cargas), modal = $("cargandoModal");
+    if (!ids.length) {
+      clearTimeout(cargaTimer);
+      cargaTimer = null;
+      modal.hidden = true;
+      return;
+    }
+    var c = cargas[ids[ids.length - 1]];
+    $("cargandoTexto").textContent = c.texto;
+    $("cargandoDetalle").textContent = c.detalle || "";
+    if (modal.hidden && !cargaTimer) {
+      cargaTimer = setTimeout(function () {
+        cargaTimer = null;
+        if (Object.keys(cargas).length) modal.hidden = false;
+      }, 250);
+    }
+  }
+
   function chip(tono, texto) { return '<span class="chip" data-tono="' + (tono || "") + '">' + esc(texto) + "</span>"; }
 
   function cajaError(texto, accion) {
@@ -460,7 +495,7 @@
       conductor: 0, plataConductor: 0, escribio: 0, comparados: 0,
       faltaCivica: 0, faltaPasajeros: 0, faltaTiquetes: 0,
       dif: 0, difPlata: 0, noCuadran: 0, civicas: 0, tiquetes: 0,
-      revisarCivica: 0, danos: 0, enCurso: 0, corregidos: 0, sinLlenar: 0, personalEmpresa: 0, personalSinViaje: 0, sinInicio: 0,
+      revisarCivica: 0, danos: 0, enCurso: 0, corregidos: 0, sinLlenar: 0, personalEmpresa: 0, personalSinViaje: 0, sinInicio: 0, sonarOtro: 0,
       estadoBus: null, avisosBus: 0,     // cómo está el bus (tarjeta_buses_dia) / cuántos buses con aviso
     };
   }
@@ -575,6 +610,7 @@
     else if (r.avisosBus) chips.push(chip("mal", r.avisosBus === 1 ? "1 bus con aviso" : r.avisosBus + " buses con aviso"));
     if (r.estadoBus && !conAviso(r.estadoBus) && avisosPasados(r.estadoBus).length) chips.push(chip("revisa", "Tuvo avisos"));
     if (r.sinInicio) chips.push(chip("mal", r.sinInicio === 1 ? "Sin inicio de labores" : r.sinInicio + " sin inicio de labores"));
+    if (r.sonarOtro) chips.push(chip("revisa", "Sonar con otro conductor"));
     if (r.danos) chips.push(chip("revisa", r.danos === 1 ? "Daño por revisar" : r.danos + " daños por revisar"));
     if (r.noCuadran) chips.push(chip("mal", r.noCuadran === 1 ? "1 viaje no cuadra" : r.noCuadran + " viajes no cuadran"));
     if (r.revisarCivica) chips.push(chip("revisa", "Cívica por revisar"));
@@ -703,8 +739,9 @@
     else pintarDia();
   }
 
-  async function cargarDia() {
+  async function cargarDia(sola) {
     var d = state.dia, fecha = d.fecha;
+    var listo = sola ? sinCarga : empezarCarga("Trayendo las tarjetas del " + fechaLarga(fecha).toLowerCase() + "…");
     d.cargando = true;
     $("diaActualizar").disabled = $("basesActualizar").disabled = true;
     if (!d.filas) pintarVistaDelDia();
@@ -715,6 +752,8 @@
         return client.from("tarjeta_buses_dia").select(CAMPOS_ESTADO_BUS).eq("dia", fecha).order("interno");
       }).catch(function () { return null; });
       var asistencia = traerAsistencia(fecha, true).catch(function () { return null; });
+      var programacion = traerProgramacion(fecha).catch(function () { return null; });
+      var listaPersonal = traerListaPersonal().catch(function () { return null; });
       var personal = state.v10 ? traerTodo(function () {
         return client.from("v_personal_viajes").select("id_local,interno,clave").eq("dia", fecha).order("leido_en").order("id_local");
       }).catch(function () { return null; }) : Promise.resolve(null);
@@ -726,8 +765,13 @@
       var lista = await estados;
       var registros = await personal;
       var marcas = await asistencia;
+      var turnos = await programacion;
+      var personalLista = await listaPersonal;
       if (d.fecha !== fecha) return;
       d.asistencia = marcas;
+      d.programacion = turnos;
+      d.listaPersonal = personalLista;
+      d.horas = horasDe(filas);
       d.personal = registros ? personalPorBus(registros) : null;
       ponerBases(filas, porBus);
       d.conBases = !!porBus;
@@ -746,9 +790,12 @@
     } catch (err) {
       if (d.fecha === fecha) d.error = err;
     } finally {
+      listo();
       d.cargando = false;
       $("diaActualizar").disabled = $("basesActualizar").disabled = false;
       if ((state.vista === "dia" || state.vista === "bases") && d.fecha === fecha) pintarVistaDelDia();
+      // si mientras traía se cambió de día, ahora trae ese (antes se quedaba en "Trayendo…")
+      if (d.fecha !== fecha && !d.filas && (state.vista === "dia" || state.vista === "bases")) cargarDia(sola);
     }
   }
 
@@ -818,59 +865,266 @@
     return promesa;
   }
 
-  // Las marcas del conductor (por su nombre de Sonar): { entrada, salida } o null si no está en la asistencia del día.
-  function marcasDe(asis, conductor, interno) {
-    if (!asis || !conductor) return null;
-    var nombre = normNombre(conductor);
-    if (asis.personas[nombre]) return asis.personas[nombre];
-    var palabras = nombre.split(" "), puntos = 0, empate = [];
-    asis.nombres.forEach(function (k) {
+  // El nombre de la lista que corresponde a ese: el idéntico o, si no hay, el de más palabras iguales (al menos 3,
+  // o todas si alguno tiene menos); si empatan, el que cumple `prefiere`.
+  function mejorNombre(nombre, mapa, prefiere) {
+    var n = normNombre(nombre);
+    if (!n || !mapa) return null;
+    if (mapa[n]) return n;
+    var palabras = n.split(" "), puntos = 0, empate = [];
+    Object.keys(mapa).forEach(function (k) {
       var otras = k.split(" ");
       var iguales = palabras.filter(function (x) { return otras.indexOf(x) >= 0; }).length;
       if (iguales < Math.min(3, palabras.length, otras.length)) return;
       if (iguales > puntos) { puntos = iguales; empate = [k]; }
       else if (iguales === puntos) empate.push(k);
     });
-    if (empate.length > 1 && interno) {
-      var delBus = empate.filter(function (k) { return asis.personas[k].buses[String(interno)]; });
-      if (delBus.length) empate = delBus;
+    if (empate.length > 1 && prefiere) {
+      var mejores = empate.filter(prefiere);
+      if (mejores.length) empate = mejores;
     }
-    return empate.length ? asis.personas[empate[0]] : null;
+    return empate[0] || null;
   }
-  function hizoInicio(asis, conductor, interno) { var p = marcasDe(asis, conductor, interno); return !!(p && p.entrada); }
+  function mismaPersona(a, b) {
+    var x = {};
+    x[normNombre(b)] = true;
+    return !!mejorNombre(a, x);
+  }
 
-  function ponerInicio(r, asis, interno) {
-    r.sinInicio = asis ? r.conductores.filter(function (c) { return !hizoInicio(asis, c, interno); }).length : 0;
+  // Las marcas del conductor (por su nombre): { entrada, salida } o null si no está en la asistencia del día.
+  function marcasDe(asis, conductor, interno) {
+    if (!asis || !conductor) return null;
+    var k = mejorNombre(conductor, asis.personas, function (x) { return interno && asis.personas[x].buses[String(interno)]; });
+    return k ? asis.personas[k] : null;
+  }
+
+  // ---- la programación del día (v_programacion_turnos): quién debe manejar cada bus, en qué turno y de qué base
+  var programacionGuardada = {};              // fecha -> { t, promesa }
+  function traerProgramacion(fecha) {
+    var g = programacionGuardada[fecha];
+    if (g && Date.now() - g.t < 10 * 60 * 1000) return g.promesa;
+    var promesa = traerTodo(function () {
+      return client.from("v_programacion_turnos").select("vehiculo,turno,nombre_programacion,hora_entrada,hora_salida,base,puesto")
+        .eq("fecha", fecha).order("vehiculo").order("turno");
+    }).then(function (filas) {
+      var porBus = {};
+      var lista = filas.filter(function (x) { return x.nombre_programacion && x.vehiculo != null; }).map(function (x) {
+        var t = { bus: String(x.vehiculo).trim(), turno: x.turno, nombre: x.nombre_programacion,
+          entra: String(x.hora_entrada || "").slice(0, 5), sale: String(x.hora_salida || "").slice(0, 5),
+          base: x.base ? nombreBase(x.base) : SIN_BASE, puesto: x.puesto || "" };
+        (porBus[t.bus] || (porBus[t.bus] = [])).push(t);
+        return t;
+      });
+      return { lista: lista, porBus: porBus };
+    });
+    programacionGuardada[fecha] = { t: Date.now(), promesa: promesa };
+    promesa.catch(function () { if (programacionGuardada[fecha] && programacionGuardada[fecha].promesa === promesa) delete programacionGuardada[fecha]; });
+    return promesa;
+  }
+
+  function minutosDe(hhmm) { var p = String(hhmm || "").split(":"); return Number(p[0]) * 60 + Number(p[1] || 0); }
+
+  // El turno programado de ese bus a esa hora: el que la contiene (desde una hora antes de entrar hasta la salida)
+  // o, si ninguno, el más cercano.
+  function turnoA(prog, bus, hhmm) {
+    var turnos = prog && prog.porBus[String(bus)] || [];
+    if (!turnos.length || !hhmm) return null;
+    var mejor = null, lejos = Infinity;
+    turnos.forEach(function (t) {
+      var a = minutosDe(t.entra) - 60, b = minutosDe(t.sale);
+      if (b <= a + 60) b += 24 * 60;                       // sale después de medianoche
+      [minutosDe(hhmm), minutosDe(hhmm) + 24 * 60].forEach(function (m) {
+        var dist = m < a ? a - m : m > b ? m - b : 0;
+        if (dist < lejos) { lejos = dist; mejor = t; }
+      });
+    });
+    return mejor;
+  }
+
+  // ---- la lista del personal (colaboradores): si el conductor está en ella y, solo para las cuentas que pueden
+  // corregir, su cédula. Un conductor que no está en la lista no puede marcar la asistencia (el 15-oct, 2 programados).
+  var listaGuardada = null;                   // { t, revisor, promesa de {nombre: { dni, vinculado }} }
+  function traerListaPersonal() {
+    if (listaGuardada && listaGuardada.revisor === state.revisor && Date.now() - listaGuardada.t < 30 * 60 * 1000) return listaGuardada.promesa;
+    var campos = "id,nombre,estado" + (state.revisor ? ",dni" : "");
+    var promesa = traerTodo(function () { return client.from("colaboradores").select(campos).order("id"); })
+      .then(function (filas) {
+        var mapa = {};
+        // primero los vinculados; un nombre repetido con cédulas distintas no muestra cédula
+        [true, false].forEach(function (vinculados) {
+          filas.forEach(function (c) {
+            if ((String(c.estado || "").toLowerCase() === "vinculado") !== vinculados) return;
+            var k = normNombre(c.nombre), dni = String(c.dni || "").trim();
+            if (!k) return;
+            if (!mapa[k]) mapa[k] = { dni: dni, vinculado: vinculados };
+            else if (mapa[k].vinculado === vinculados && mapa[k].dni !== dni) mapa[k].dni = "?";
+          });
+        });
+        return mapa;
+      });
+    listaGuardada = { t: Date.now(), revisor: state.revisor, promesa: promesa };
+    promesa.catch(function () { if (listaGuardada && listaGuardada.promesa === promesa) listaGuardada = null; });
+    return promesa;
+  }
+  // Lo que va después de "Sin inicio de labores": la cédula (si la cuenta puede corregir) o que no está en la lista.
+  function extraSinInicio(lista, nombre) {
+    if (!lista) return "";
+    var k = mejorNombre(nombre, lista);
+    if (!k) return "no está en la lista del personal";
+    var dni = lista[k].dni;
+    return dni && dni !== "?" ? "CC " + dni.replace(/\B(?=(\d{3})+(?!\d))/g, ".") : "";
+  }
+
+  // La hora del primer viaje de cada conductor en cada bus: "interno|conductor" -> "HH:MM".
+  function horasDe(filas) {
+    var horas = {};
+    filas.forEach(function (f) {
+      var k = f.interno + "|" + f.conductor;
+      if (f.conductor && f.hora_salida && !horas[k]) horas[k] = hora(f.hora_salida);
+    });
+    return horas;
+  }
+
+  // Cómo está el inicio de labores de un conductor de Sonar en un bus (ctx: asistencia, programacion, horas):
+  //   ok    = él hizo el inicio;
+  //   otro  = él no marcó, pero a esa hora el bus está programado para otro conductor que sí lo hizo (Sonar trae el
+  //           nombre que no es: el 20-oct el 756 salía con el conductor del turno 2 y manejaba el del turno 1);
+  //   falta = no hay inicio de labores.
+  function estadoInicio(ctx, conductor, interno) {
+    var p = marcasDe(ctx.asistencia, conductor, interno);
+    if (p && p.entrada) return { tipo: "ok", p: p };
+    var t = turnoA(ctx.programacion, interno, (ctx.horas || {})[interno + "|" + conductor]);
+    if (t && !mismaPersona(conductor, t.nombre)) {
+      var q = marcasDe(ctx.asistencia, t.nombre, interno);
+      if (q && q.entrada) return { tipo: "otro", turno: t, q: q };
+    }
+    return { tipo: "falta" };
+  }
+
+  // pares = [{ interno, conductor }]: cuenta los sin inicio y los que Sonar trae con otro nombre.
+  function ponerInicio(r, ctx, pares) {
+    r.sinInicio = r.sonarOtro = 0;
+    if (!ctx.asistencia) return;
+    pares.forEach(function (x) {
+      var e = estadoInicio(ctx, x.conductor, x.interno);
+      if (e.tipo === "falta") r.sinInicio++;
+      else if (e.tipo === "otro") r.sonarOtro++;
+    });
+  }
+  function paresDeBus(r) { return r.conductores.map(function (c) { return { interno: r.clave, conductor: c }; }); }
+  function paresDeFilas(filas) {
+    var vistos = {}, pares = [];
+    filas.forEach(function (f) {
+      var k = f.interno + "|" + f.conductor;
+      if (f.conductor && !vistos[k]) { vistos[k] = true; pares.push({ interno: f.interno, conductor: f.conductor }); }
+    });
+    return pares;
   }
 
   function horaMarca(m) { return hora(m.fecha + "T" + String(m.hora).slice(0, 8) + "-05:00"); }
   function textoMarca(m) { return horaMarca(m) + (ORIGEN_MARCA[m.origen] ? " · " + ORIGEN_MARCA[m.origen] : ""); }
-
-  function lineaInicio(asis, conductor, interno, conSalida) {
-    var p = marcasDe(asis, conductor, interno);
-    if (!p || !p.entrada) return '<span class="inicio" data-falta>Sin inicio de labores</span>';
-    return '<span class="inicio">Inicio ' + esc(textoMarca(p.entrada)) +
-      (conSalida && p.salida ? " · salida " + esc(horaMarca(p.salida)) : "") + "</span>";
+  function sinInicioHtml(ctx, nombre) {
+    var extra = extraSinInicio(ctx.listaPersonal, nombre);
+    return '<span class="inicio" data-falta>Sin inicio de labores' + (extra ? " · " + esc(extra) : "") + "</span>";
   }
 
-  function celdaConductores(r, asis) {
+  function lineaInicio(ctx, conductor, interno, conSalida) {
+    var e = estadoInicio(ctx, conductor, interno);
+    if (e.tipo === "ok") {
+      return '<span class="inicio">Inicio ' + esc(textoMarca(e.p.entrada)) +
+        (conSalida && e.p.salida ? " · salida " + esc(horaMarca(e.p.salida)) : "") + "</span>";
+    }
+    if (e.tipo === "otro") {
+      return '<span class="inicio" data-otro>Sonar lo pone, pero el turno ' + esc(e.turno.turno) + " es de " +
+        esc(capitalizar(e.turno.nombre)) + ": inicio " + esc(textoMarca(e.q.entrada)) + "</span>";
+    }
+    return sinInicioHtml(ctx, conductor);
+  }
+
+  function celdaConductores(r, ctx) {
     return r.conductores.map(function (c, i) {
       var nombre = esc(capitalizar(c));
-      return (i ? '<span class="menor">y ' + nombre + "</span>" : nombre) + lineaInicio(asis, c, r.clave, false);
+      return (i ? '<span class="menor">y ' + nombre + "</span>" : nombre) + lineaInicio(ctx, c, r.clave, false);
     }).join("");
   }
 
-  // El cuadro de arriba: cuántos conductores con viajes hicieron el inicio de labores.
-  function totalInicio(filas, asis) {
-    if (!asis) return "";
-    var conductores = {};
-    filas.forEach(function (f) { if (f.conductor) conductores[f.conductor] = conductores[f.conductor] || f.interno; });
-    var nombres = Object.keys(conductores);
-    if (!nombres.length) return "";
-    var faltan = nombres.filter(function (c) { return !hizoInicio(asis, c, conductores[c]); }).length;
+  // El cuadro de arriba: cuántos conductores con viajes hicieron el inicio de labores (o lo hizo el programado de
+  // ese turno, cuando Sonar trae otro nombre).
+  function totalInicio(filas, ctx) {
+    if (!ctx.asistencia) return "";
+    var pares = paresDeFilas(filas), vistos = {}, total = 0, faltan = 0, otros = 0;
+    pares.forEach(function (x) {
+      if (vistos[x.conductor]) return;
+      vistos[x.conductor] = true;
+      total++;
+      var e = estadoInicio(ctx, x.conductor, x.interno);
+      if (e.tipo === "falta") faltan++;
+      else if (e.tipo === "otro") otros++;
+    });
+    if (!total) return "";
     return '<div class="total" data-tono="' + (faltan ? "mal" : "bien") + '"><span>Inicio de labores</span><strong>' +
-      (nombres.length - faltan) + " de " + nombres.length + "</strong><small>" +
-      (faltan ? (faltan === 1 ? "1 conductor sin marcar" : faltan + " conductores sin marcar") : "todos los conductores marcaron") + "</small></div>";
+      (total - faltan) + " de " + total + "</strong><small>" +
+      (faltan ? (faltan === 1 ? "1 conductor sin marcar" : faltan + " conductores sin marcar") : "todos los conductores marcaron") +
+      (otros ? " · " + (otros === 1 ? "1 bus" : otros + " buses") + " con otro nombre en Sonar" : "") + "</small></div>";
+  }
+
+  // ---- Por base: los conductores programados de cada base, con su inicio de labores
+  // Pedido del usuario el 20-oct-2026 ("nos podemos traer los conductores por base"): sale de la programación del
+  // día. Si el turno todavía no empieza, lo dice; si en Sonar figura otro conductor en ese turno, también.
+  function pintarConductoresBase(d) {
+    var caja = $("basesConductores");
+    if (!d.filas) { caja.innerHTML = ""; return; }
+    if (!d.programacion || !d.asistencia) {
+      caja.innerHTML = '<p class="nota">No se pudo leer la programación o la asistencia del día: sin eso no salen los conductores por base.</p>';
+      return;
+    }
+    var ahora = d.fecha === diaDeHoy() ? minutosDe(fmtHora.format(new Date())) : null;
+    var sonar = {};                              // bus -> [{ hora, conductor }]
+    d.filas.forEach(function (f) {
+      if (f.conductor && f.hora_salida) (sonar[f.interno] || (sonar[f.interno] = [])).push({ hora: hora(f.hora_salida), conductor: f.conductor });
+    });
+    var grupos = {};
+    d.programacion.lista.forEach(function (t) {
+      var p = marcasDe(d.asistencia, t.nombre, t.bus);
+      var estado = p && p.entrada ? "ok" : ahora != null && ahora < minutosDe(t.entra) && minutosDe(t.entra) >= CORTE_MIN ? "luego" : "falta";
+      var enTurno = (sonar[t.bus] || []).filter(function (v) { return turnoA(d.programacion, t.bus, v.hora) === t; });
+      var otros = [];
+      enTurno.forEach(function (v) { if (!mismaPersona(v.conductor, t.nombre)) agregarUnico(otros, v.conductor); });
+      (grupos[t.base] || (grupos[t.base] = [])).push({ t: t, p: p, estado: estado, viajes: enTurno.length, otros: otros });
+    });
+    var bases = Object.keys(grupos).sort(compararBases);
+    if (!bases.length) { caja.innerHTML = '<p class="nota">La programación de este día no tiene conductores.</p>'; return; }
+    var ORDEN = { falta: 0, ok: 1, luego: 2 };
+    caja.innerHTML = '<h2 class="seccion-titulo">Conductores por base</h2>' + bases.map(function (base) {
+      var g = grupos[base].sort(function (a, b) {
+        return ORDEN[a.estado] - ORDEN[b.estado] || compararInternos(a.t.bus, b.t.bus) || a.t.turno - b.t.turno;
+      });
+      var cuenta = { ok: 0, falta: 0, luego: 0 }, conOtro = 0;
+      g.forEach(function (x) { cuenta[x.estado]++; if (x.otros.length) conOtro++; });
+      return '<details class="conductores-base"' + (cuenta.falta ? " open" : "") + "><summary><b>" + esc(base) + "</b> · " +
+        g.length + (g.length === 1 ? " programado" : " programados") + " · " + cuenta.ok + " con inicio" +
+        (cuenta.falta ? ' · <span class="dif-mal">' + cuenta.falta + " sin inicio</span>" : "") +
+        (cuenta.luego ? " · " + cuenta.luego + " entran más tarde" : "") +
+        (conOtro ? ' · <span class="aviso-otro">' + (conOtro === 1 ? "1 turno" : conOtro + " turnos") + " con otro nombre en Sonar</span>" : "") + "</summary>" +
+        '<div class="tabla-caja"><table class="tabla-conductores"><thead><tr><th>Bus</th><th>Turno</th><th>Conductor programado</th>' +
+        "<th>Inicio de labores</th><th>En Sonar</th></tr></thead><tbody>" + g.map(function (x) {
+          var t = x.t;
+          var inicio = x.estado === "ok" ? '<span class="inicio">' + esc(textoMarca(x.p.entrada)) +
+              (x.p.salida ? " · salida " + esc(horaMarca(x.p.salida)) : "") + "</span>"
+            : x.estado === "luego" ? '<span class="menor">Entra a las ' + esc(t.entra) + "</span>"
+            : sinInicioHtml(d, t.nombre);
+          var enSonar = x.otros.length ? '<span class="inicio" data-otro>Figura ' + esc(x.otros.map(capitalizar).join(", ")) + "</span>"
+            : x.viajes ? (x.viajes === 1 ? "1 viaje" : x.viajes + " viajes") : "—";
+          return "<tr><td>" + '<a class="bus-num" href="#/bus/' + encodeURIComponent(t.bus) + "/" + d.fecha + '">' + esc(t.bus) + "</a></td>" +
+            "<td>" + esc(t.turno) + '<span class="menor">' + esc(t.entra + "–" + t.sale) + "</span></td>" +
+            "<td>" + esc(capitalizar(t.nombre)) + (t.puesto ? '<span class="menor">' + esc(capitalizar(t.puesto)) + "</span>" : "") + "</td>" +
+            "<td>" + inicio + "</td><td>" + enSonar + "</td></tr>";
+        }).join("") + "</tbody></table></div></details>";
+    }).join("") +
+    '<p class="pie">De la programación del día. Inicio de labores = la entrada en la asistencia (celular u oficina), buscada por el nombre.' +
+      " Si el conductor no está en la lista del personal, no puede marcar." +
+      (state.revisor ? " La cédula sale solo a las cuentas que pueden corregir." : "") +
+      " \u201cEn Sonar\u201d dice cuántos viajes hizo el bus en ese turno y si Sonar los tiene a nombre de otro conductor.</p>";
   }
 
   function pasaFiltro(r, d) {
@@ -921,7 +1175,7 @@
     });
     buses.forEach(function (r) { r.estadoBus = d.estados ? d.estados[r.clave] || null : null; });
     ponerPersonal(buses, d);
-    buses.forEach(function (r) { ponerInicio(r, d.asistencia, r.clave); });
+    buses.forEach(function (r) { ponerInicio(r, d, paresDeBus(r)); });
     pintarAvisos(d, buses, base);
     pintarSinLlenar(d, filas, base);
     var todo = nuevoResumen("todo");
@@ -931,7 +1185,7 @@
     totales.innerHTML = totalesHtml(todo,
       '<div class="total"' + (avisan ? ' data-tono="mal"' : "") + "><span>" + (base ? "Buses · " + esc(base) : "Buses") + "</span><strong>" +
         buses.length + "</strong><small>" + (avisan ? (avisan === 1 ? "1 con aviso" : avisan + " con aviso") + " · " : "") +
-        (conProblemas ? conProblemas + " para revisar" : "ninguno para revisar") + "</small></div>" + totalInicio(filas, d.asistencia));
+        (conProblemas ? conProblemas + " para revisar" : "ninguno para revisar") + "</small></div>" + totalInicio(filas, d));
 
     // Las rutas del día, para el filtro
     var nombres = {};
@@ -963,7 +1217,7 @@
       html += '<tr class="fila-link" tabindex="0" data-bus="' + esc(r.clave) + '">' +
         '<td><span class="bus-num">' + esc(r.clave) + '</span><span class="menor">' + esc(r.placa) + "</span>" +
           (d.conBases && !base ? '<span class="menor">' + esc(r.bases.join(", ")) + "</span>" : "") + "</td>" +
-        "<td>" + (d.asistencia && r.conductores.length ? celdaConductores(r, d.asistencia) : esc(capitalizar(r.conductores[0] || "—")) + otros) + "</td>" +
+        "<td>" + (d.asistencia && r.conductores.length ? celdaConductores(r, d) : esc(capitalizar(r.conductores[0] || "—")) + otros) + "</td>" +
         celdasNumeros(r) +
         "<td>" + chipsEstado(r) + "</td></tr>";
     });
@@ -1003,6 +1257,7 @@
       caja.innerHTML = d.error ? cajaError("No se pudo traer el día: " + textoError(d.error), "recargar-dia")
         : '<p class="cargando">Trayendo las tarjetas del día…</p>';
       $("basesPie").textContent = "";
+      $("basesConductores").innerHTML = "";
       return;
     }
     if (!d.conBases) {
@@ -1011,6 +1266,7 @@
       pintarBases(d, d.base);
       if (!caja.innerHTML) caja.innerHTML = '<p class="vacio">Todavía no hay tarjetas este día. Aparecen cuando el programa del servidor las publica.</p>';
     }
+    pintarConductoresBase(d);
     $("basesPie").textContent = d.cargadoEn ? "Actualizado a las " + fmtHora.format(new Date(d.cargadoEn)) +
       ". Toque una base para ver sus buses en el Día; “Todas las bases” los muestra todos." +
       " Diferencia = lo que dice el conductor menos lo del sensor, solo en los viajes que ya llegaron." : "";
@@ -1037,7 +1293,7 @@
     bases.sort(function (a, b) { return compararBases(a.clave, b.clave); });
     bases.forEach(function (r) {
       r.avisosBus = r.buses.filter(function (i) { return conAviso(d.estados && d.estados[i]); }).length;
-      ponerInicio(r, d.asistencia, null);
+      ponerInicio(r, d, paresDeFilas(d.filas.filter(function (f) { return f.base === r.clave; })));
       if (d.personal) {
         r.personalEmpresa = r.personalSinViaje = 0;
         r.buses.forEach(function (i) {
@@ -1170,14 +1426,13 @@
     var b = state.bus;
     interno = interno ? String(interno).trim() : "";
     $("busFecha").value = fecha;
-    $("busNumero").value = interno;
-    llenarListaBuses();
+    llenarListaBuses(interno, fecha);
     $("busVolver").href = "#/dia/" + fecha;
     if (!interno) {
       b.interno = null;
       b.fecha = fecha;
       $("busTitulo").textContent = "Tarjeta del bus";
-      $("busSub").textContent = "Escriba el número del bus y el día.";
+      $("busSub").textContent = "Escoja la base y el bus, y el día.";
       $("busCuerpo").innerHTML = '<p class="vacio">También puede abrirla desde la lista del día, tocando el bus.</p>';
       $("busExcel").disabled = $("busImprimir").disabled = true;
       return;
@@ -1200,16 +1455,74 @@
     if (!b.filas && !b.cargando) cargarBus();
   }
 
-  function llenarListaBuses() {
-    var internos = {};
-    (state.dia.filas || []).forEach(function (f) { internos[f.interno] = f.placa || ""; });
-    $("busLista").innerHTML = Object.keys(internos).sort(compararInternos).map(function (k) {
-      return '<option value="' + esc(k) + '">' + esc(internos[k]) + "</option>";
+  // Las listas de la Tarjeta del bus: la base (se recuerda, como en el Día) y sus buses. Salen de la programación
+  // de ese día y de los buses con viajes que ya trajo el Día; el bus abierto siempre está.
+  function llenarListaBuses(interno, fecha) {
+    var b = state.bus;
+    b.listaFecha = fecha;
+    pintarListaBuses(interno);
+    traerProgramacion(fecha).then(function (prog) {
+      if (b.listaFecha !== fecha) return;
+      b.listaProg = prog;
+      pintarListaBuses(b.interno || interno);
+    }, function () {});
+  }
+
+  function busesDeLaLista(fecha) {
+    var b = state.bus, buses = {};
+    var prog = b.listaFecha === fecha ? b.listaProg : null;
+    if (prog && prog.porBus) Object.keys(prog.porBus).forEach(function (k) { buses[k] = prog.porBus[k][0].base; });
+    if (state.dia.fecha === fecha) {
+      (state.dia.filas || []).concat(state.dia.sinViajes || []).forEach(function (f) { if (!buses[f.interno]) buses[f.interno] = f.base || SIN_BASE; });
+    }
+    return buses;
+  }
+
+  function pintarListaBuses(interno) {
+    var b = state.bus, fecha = b.listaFecha;
+    var buses = busesDeLaLista(fecha);
+    if (interno && !buses[interno]) buses[interno] = b.base || SIN_BASE;
+    var cuenta = {};
+    Object.keys(buses).forEach(function (k) { cuenta[buses[k]] = (cuenta[buses[k]] || 0) + 1; });
+    var bases = Object.keys(cuenta).sort(compararBases);
+    if (b.filtroBase === undefined) b.filtroBase = baseGuardada();
+    if (b.filtroBase && !cuenta[b.filtroBase]) b.filtroBase = "";
+    var selBase = $("busBase");
+    selBase.innerHTML = '<option value="">Todas las bases</option>' + bases.map(function (x) {
+      return '<option value="' + esc(x) + '">' + esc(x) + " (" + cuenta[x] + ")</option>";
     }).join("");
+    selBase.value = b.filtroBase;
+    var lista = Object.keys(buses).filter(function (k) { return !b.filtroBase || buses[k] === b.filtroBase || k === interno; })
+      .sort(compararInternos);
+    b.listaBuses = lista;
+    var selBus = $("busNumero");
+    selBus.innerHTML = '<option value="">Bus…</option>' + lista.map(function (k) {
+      return '<option value="' + esc(k) + '">' + esc(k) + (b.filtroBase ? "" : " · " + esc(buses[k])) + "</option>";
+    }).join("");
+    selBus.value = interno || "";
+    var pos = lista.indexOf(interno);
+    $("busAntes").disabled = !lista.length || pos === 0;
+    $("busDespues").disabled = !lista.length || pos === lista.length - 1;
+  }
+
+  function irAlBus(interno) {
+    var fecha = $("busFecha").value;
+    if (!interno || !esFecha(fecha)) return;
+    location.hash = "#/bus/" + encodeURIComponent(interno) + "/" + fecha;
+  }
+
+  // ‹ y ›: el bus anterior o el siguiente de la lista (de la base escogida).
+  function moverBus(paso) {
+    var lista = state.bus.listaBuses || [];
+    if (!lista.length) return;
+    var pos = lista.indexOf(state.bus.interno);
+    var otro = lista[pos < 0 ? 0 : Math.max(0, Math.min(lista.length - 1, pos + paso))];
+    if (otro && otro !== state.bus.interno) irAlBus(otro);
   }
 
   async function cargarBus() {
     var b = state.bus, interno = b.interno, fecha = b.fecha;
+    var listo = empezarCarga("Trayendo la tarjeta del bus " + interno + "…");
     b.cargando = true;
     function de(tabla, campos) {
       return conTiempo(client.from(tabla).select(campos).eq("interno", interno).eq("dia", fecha));
@@ -1237,6 +1550,8 @@
           .catch(function () { return { data: [] }; }),
         // el inicio de labores de los conductores (asistencias)
         traerAsistencia(fecha, false).catch(function () { return null; }),
+        traerProgramacion(fecha).catch(function () { return null; }),
+        traerListaPersonal().catch(function () { return null; }),
       ]);
       if (res[0].error) throw res[0].error;
       if (b.interno !== interno || b.fecha !== fecha) return;
@@ -1254,6 +1569,9 @@
       b.gestores = res[9] && res[9].data || [];
       b.personal = res[10] && res[10].data || [];
       b.asistencia = res[12] || null;
+      b.programacion = res[13] || null;
+      b.listaPersonal = res[14] || null;
+      b.horas = horasDe(b.filas);
       b.novedades = res[11] && !res[11].error ? res[11].data || [] : [];
       b.novPorClave = {};
       b.novedades.forEach(function (x) { if (x.clave_viaje) (b.novPorClave[x.clave_viaje] = b.novPorClave[x.clave_viaje] || []).push(x); });
@@ -1270,8 +1588,11 @@
     } catch (err) {
       if (b.interno === interno && b.fecha === fecha) b.error = err;
     } finally {
+      listo();
       b.cargando = false;
       if (state.vista === "bus" && b.interno === interno && b.fecha === fecha) pintarBus();
+      // si mientras traía se escogió otro bus u otro día, ahora trae ese (antes se quedaba en "Trayendo…")
+      if ((b.interno !== interno || b.fecha !== fecha) && b.interno && !b.filas && state.vista === "bus") cargarBus();
     }
   }
 
@@ -1328,6 +1649,7 @@
     var html = avisoDelBus(b.estadoBus) + '<div class="bus-cabeza">' +
       datoConductor("Conductor 1", r.conductores[0], b) +
       datoConductor("Conductor 2", r.conductores[1], b, r.conductores.length > 2 ? " y " + (r.conductores.length - 2) + " más" : "") +
+      datoProgramacion(b) +
       '<div class="dato dato-ancho"><span>Rutas</span><ul>' + (r.rutas.map(function (k) {
         var f = b.filas.filter(function (x) { return x.ruta === k; })[0];
         return "<li>" + esc(k + " · " + (rutaLegible(f && f.itinerario) || "")) + "</li>";
@@ -1387,9 +1709,24 @@
       (foto && foto.lat != null ? " · " + lugarDe(foto) : "") + "</span></li>";
   }
 
+  // Los turnos programados del bus ese día, cada uno con su inicio de labores.
+  function datoProgramacion(b) {
+    var turnos = b.programacion && b.programacion.porBus[String(b.interno)] || [];
+    if (!turnos.length || !b.asistencia) return "";
+    var ahora = b.fecha === diaDeHoy() ? minutosDe(fmtHora.format(new Date())) : null;
+    return '<div class="dato dato-ancho"><span>Programación</span><ul class="turnos">' + turnos.map(function (t) {
+      var p = marcasDe(b.asistencia, t.nombre, t.bus);
+      var inicio = p && p.entrada ? '<span class="inicio">Inicio ' + esc(textoMarca(p.entrada)) +
+          (p.salida ? " · salida " + esc(horaMarca(p.salida)) : "") + "</span>"
+        : ahora != null && ahora < minutosDe(t.entra) && minutosDe(t.entra) >= CORTE_MIN ? '<span class="inicio" data-luego>Entra a las ' + esc(t.entra) + "</span>"
+        : sinInicioHtml(b, t.nombre);
+      return "<li>Turno " + esc(t.turno) + " · " + esc(t.entra + "–" + t.sale) + " · " + esc(capitalizar(t.nombre)) + inicio + "</li>";
+    }).join("") + "</ul></div>";
+  }
+
   function datoConductor(titulo, conductor, b, mas) {
     return '<div class="dato"><span>' + esc(titulo) + "</span><strong>" + esc(capitalizar(conductor || "—") + (mas || "")) + "</strong>" +
-      (conductor && b.asistencia ? lineaInicio(b.asistencia, conductor, b.interno, true) : "") + "</div>";
+      (conductor && b.asistencia ? lineaInicio(b, conductor, b.interno, true) : "") + "</div>";
   }
 
   function dato(titulo, valor) { return '<div class="dato"><span>' + esc(titulo) + "</span><strong>" + esc(valor) + "</strong></div>"; }
@@ -1945,6 +2282,7 @@
   async function cargarGestores() {
     var g = state.ges, fecha = g.fecha;
     if (!state.v10) { pintarGestores(); return; }
+    var listo = empezarCarga("Trayendo el personal de la empresa…");
     g.cargando = true;
     try {
       var res = await conTiempo(client.from("v_personal_viajes").select(CAMPOS_PERSONAL).eq("dia", fecha).order("leido_en"));
@@ -1958,6 +2296,7 @@
     } catch (err) {
       if (g.fecha === fecha) g.error = err;
     } finally {
+      listo();
       g.cargando = false;
       if (state.vista === "gestores" && g.fecha === fecha) pintarGestores();
     }
@@ -2064,6 +2403,7 @@
   async function cargarNovedades() {
     var v = state.nov, desde = v.desde, hasta = v.hasta;
     if (!esFecha(desde) || !esFecha(hasta) || desde > hasta) { pintarNovedades(); return; }
+    var listo = empezarCarga("Trayendo las novedades…");
     v.cargando = true;
     try {
       var lista = await traerTodo(function () {
@@ -2078,6 +2418,7 @@
       if (faltaTabla(err)) { v.hay = false; v.lista = []; v.error = null; }
       else v.error = err;
     } finally {
+      listo();
       v.cargando = false;
       if (state.vista === "novedades" && v.desde === desde && v.hasta === hasta) pintarNovedades();
     }
@@ -2304,6 +2645,7 @@
   async function cargarMovilidad() {
     var m = state.mov, desde = m.desde, hasta = m.hasta;
     if (rangoMovilidadMalo(m)) return pintarMovilidad();
+    var listo = empezarCarga("Trayendo la movilidad del " + fechaCorta(desde) + " al " + fechaCorta(hasta) + "…");
     m.cargando = true;
     $("movExcel").disabled = true;
     function sigue() { return m.desde === desde && m.hasta === hasta; }
@@ -2366,6 +2708,7 @@
     } catch (err) {
       if (sigue()) m.error = err;
     } finally {
+      listo();
       m.cargando = false;
       if (state.vista === "movilidad" && sigue()) pintarMovilidad();
     }
@@ -3289,6 +3632,7 @@
     m.armandoExcel = true;
     boton.disabled = true;
     boton.textContent = "Armando el Excel…";
+    var listo = empezarCarga("Armando el Excel de la movilidad…");
     try {
       var ExcelJS = await cargarExcelJS();
       var libro = new ExcelJS.Workbook();
@@ -3376,6 +3720,7 @@
     } catch (err) {
       aviso("No se pudo armar el Excel: " + textoError(err), "mal");
     } finally {
+      listo();
       m.armandoExcel = false;
       boton.textContent = "Descargar Excel";
       boton.disabled = !(m.filas && m.filas.length);
@@ -3443,7 +3788,8 @@
   // El mismo Excel que arma el programa de Python para los auxiliares (enturnes/viaje_a_viaje.py), con lo
   // que hay en Supabase: cada apertura de puerta y el total de cada viaje con fórmulas, el resumen por viaje
   // y el resumen por bus. Lo que el conductor escribió en "Mi tarjeta" va en TARJETA y manda sobre el
-  // sensor; el auxiliar lo puede cambiar en el Excel y todo se recalcula.
+  // sensor; el auxiliar lo puede cambiar en el Excel y todo se recalcula. Aparte, en CONDUCTOR REPORTA, quedan
+  // los pasajeros y los tiquetes que reportó el conductor, sin fórmula: no cambian aunque cambien la TARJETA.
   // No trae la hoja "Fuera de la ruta" ni las aperturas sin viaje: de esas Supabase solo sabe cuántas fueron.
   // Va con ExcelJS porque lleva los colores (la herramienta de los otros Excel no los escribe); se carga al
   // tocar el botón, como el mapa.
@@ -3533,8 +3879,9 @@
 
   function armarViajeAViaje(libro, filas, extra, sinViajes) {
     var V = hojaVaV(libro, "Viaje a viaje", ["Vehiculo", "Viaje", "Fecha", "Hora", "Entradas", "Salidas", "Combuses",
-      "No pasajeros", "TARJETA (si la escribe, manda)", "CONTEO SENSOR", "EVIDENCIA VIDEO", "Bloqueos", "Direccion",
-      "Conductor", "Itinerario", "Gestores (no cuentan)", "Base"]);
+      "No pasajeros", "TARJETA (si la escribe, manda)", "CONTEO SENSOR", "CONDUCTOR REPORTA pasajeros",
+      "CONDUCTOR REPORTA tiquetes", "EVIDENCIA VIDEO", "Bloqueos", "Direccion", "Conductor", "Itinerario",
+      "Gestores (no cuentan)", "Base"]);
     var viajes = [], buses = [], bus = null;
     filas.forEach(function (f) {
       if (!bus || bus.interno !== f.interno) {
@@ -3547,7 +3894,8 @@
       var primero = 0, ultimo = 0, entran = 0, salen = 0;
       eventos.forEach(function (e) {
         var r = V.poner([f.interno, null, fechaVaV(e.hora), horaVaV(e.hora), n(e.suben), n(e.bajan), null, null, null, null,
-          null, e.tapado ? "Sensor tapado" : null, e.donde || null, f.conductor || null, null, n(e.gestores) || null, null],
+          null, null, null, e.tapado ? "Sensor tapado" : null, e.donde || null, f.conductor || null, null, n(e.gestores) || null,
+          null],
           n(e.suben) ? COLOR_VAV.verde : null);
         if (!primero) primero = r;
         ultimo = r;
@@ -3563,12 +3911,17 @@
       var tarjeta = f.pasajeros_conductor == null ? null : n(f.pasajeros_conductor);
       var sensor = Math.min(Math.max(0, entran - gestores), TOPE);
       var combuses = tarjeta == null ? sensor : tarjeta;
+      // Lo que reportó el conductor en el portal (vacío: no lo ha escrito).
+      var reporta = f.pasajeros_conductor == null ? null : n(f.pasajeros_conductor);
+      var reportaTiquetes = f.tiquetes_escaneados == null ? null : n(f.tiquetes_escaneados);
       var notas = [];
       if (f.sin_despacho) notas.push("VIAJE SIN DESPACHO: el bus llevó gente y nadie lo despachó");
       else if (n(f.recortados)) notas.push("REVISAR: el sensor pasó de " + TOPE);
       if (gestores) notas.push(gestores === 1 ? "1 gestor subió con su código: no cuenta" : gestores + " gestores subieron con su código: no cuentan");
       if (f.pasajeros != null && n(f.pasajeros) !== n(f.pasajeros_sensor)) notas.push("Control corrigió el sensor a " + n(f.pasajeros));
       if (f.estado_calculo === "en_curso") notas.push("EN CAMINO: el sensor todavía puede contar");
+      var corrigio = [f.pasajeros_conductor_corregidos && "los pasajeros", f.tiquetes_corregidos && "los tiquetes"].filter(Boolean);
+      if (corrigio.length) notas.push("Control corrigió " + corrigio.join(" y ") + " del conductor");
       V.poner([f.interno, f.sin_despacho ? "SIN DESPACHO" : f.viaje, fechaVaV(f.hora_salida),
         horaVaV(f.hora_salida) + " a " + (f.estado_calculo === "en_curso" ? "en camino" : horaVaV(f.llego_en)),
         primero ? formula("SUM(E" + primero + ":E" + ultimo + ")", entran) : 0,
@@ -3576,22 +3929,25 @@
         formula("IF(COUNT(" + bloque + ")>0,SUM(" + bloque + "),J" + r + ")", combuses),
         formula("MAX(0,E" + r + "-G" + r + ")", Math.max(0, entran - combuses)),
         tarjeta,
-        formula("MIN(MAX(0,E" + r + "-P" + r + ")," + TOPE + ")", sensor),
+        formula("MIN(MAX(0,E" + r + "-R" + r + ")," + TOPE + ")", sensor),
+        reporta, reportaTiquetes,
         null, null, notas.join(". ") || null, f.conductor || null, itinerarioVaV(f, x, eventos), gestores || null, f.base || null],
         f.sin_despacho ? COLOR_VAV.ambar : n(f.recortados) ? COLOR_VAV.rojo : COLOR_VAV.azul, true);
       V.poner([]);
       viajes.push({ f: f, x: x, eventos: eventos, r: r, bloque: bloque, entran: entran, salen: salen, gestores: gestores,
-        tarjeta: tarjeta, sensor: sensor, combuses: combuses, no: Math.max(0, entran - combuses) });
+        tarjeta: tarjeta, sensor: sensor, combuses: combuses, no: Math.max(0, entran - combuses),
+        reporta: reporta, reportaTiquetes: reportaTiquetes });
       bus.viajes.push(viajes[viajes.length - 1]);
     });
     V.cerrar();
-    V.ws.autoFilter = "A1:Q" + Math.max(2, V.ultima);
+    V.ws.autoFilter = "A1:S" + Math.max(2, V.ultima);
 
     // ------------------------------------------------------------------ resumen por viaje
     var VV = "'Viaje a viaje'!";
     var R = hojaVaV(libro, "Resumen por viaje", ["Vehiculo", "Viaje", "Fecha", "Salio", "Cerro", "Itinerario",
       "Cancelado en Sonar", "Entradas del sensor", "Salidas", "PERSONAS MOVILIZADAS", "No pasajeros", "Alerta",
-      "TARJETA (conductor)", "CONTEO SENSOR", "Gestores (no cuentan)", "Conductor", "Base", "Numero de despacho"]);
+      "TARJETA (conductor)", "CONTEO SENSOR", "CONDUCTOR REPORTA pasajeros", "CONDUCTOR REPORTA tiquetes",
+      "Gestores (no cuentan)", "Conductor", "Base", "Numero de despacho"]);
     viajes.forEach(function (v) {
       var f = v.f, r = v.r;
       var alerta = f.sin_despacho ? "Viaje SIN DESPACHO: nadie lo despachó"
@@ -3603,7 +3959,10 @@
         formula(VV + "E" + r, v.entran), formula(VV + "F" + r, v.salen), formula(VV + "G" + r, v.combuses),
         formula(VV + "H" + r, v.no), alerta || null,
         formula("IF(COUNT(" + VV + v.bloque + ")>0,SUM(" + VV + v.bloque + "),\"\")", v.tarjeta == null ? "" : v.tarjeta),
-        formula(VV + "J" + r, v.sensor), v.gestores || null, f.conductor || null, f.base || null,
+        formula(VV + "J" + r, v.sensor),
+        formula("IF(" + VV + "K" + r + "=\"\",\"\"," + VV + "K" + r + ")", v.reporta == null ? "" : v.reporta),
+        formula("IF(" + VV + "L" + r + "=\"\",\"\"," + VV + "L" + r + ")", v.reportaTiquetes == null ? "" : v.reportaTiquetes),
+        v.gestores || null, f.conductor || null, f.base || null,
         f.sin_despacho ? null : f.clave]);
       R.pintar(v.rr, 10, COLOR_VAV.verde);
       if (alerta) R.pintar(v.rr, 12, COLOR_VAV.rojo);
@@ -3638,7 +3997,7 @@
           formula("SUM(" + col("K") + ")", b.no),
           formula("COUNTIF(" + col("B") + ",\"SIN DESPACHO\")", b.sd),
           formula("SUMIF(" + col("B") + ",\"SIN DESPACHO\"," + col("J") + ")", b.sdPersonas),
-          formula("SUM(" + col("O") + ")", b.gestores), b.base || null]);
+          formula("SUM(" + col("Q") + ")", b.gestores), b.base || null]);
       } else {
         B.poner([b.interno, 0, 0, 0, 0, 0, 0, 0, b.base || null]);
       }
@@ -3664,6 +4023,7 @@
       "Renglones verdes: cada vez que se abrió la puerta y subió alguien. Renglón azul: el total del viaje (ámbar: sin despacho; rojo: el sensor pasó de " + TOPE + ").",
       "TARJETA: viene con los pasajeros que el conductor escribió en \"Mi tarjeta\". Si hay un número, aunque sea 0, manda sobre el sensor. Se puede cambiar o borrar y todo se recalcula.",
       "CONTEO SENSOR: lo que contó la puerta, sin los gestores que subieron con su código y con el tope de " + TOPE + " por viaje.",
+      "CONDUCTOR REPORTA: los pasajeros y los tiquetes que el conductor reportó en su tarjeta del portal, en el renglón azul de cada viaje. Vacío: no lo ha escrito. No cambian aunque se cambie la TARJETA.",
       "No trae la hoja \"Fuera de la ruta\" ni las aperturas de puerta sin viaje (patio, taller, aseo): esas solo salen en el Excel del programa de Python.",
     ].forEach(function (t) { N.addRow([t]); });
     N.getColumn(1).width = 120;
@@ -3691,6 +4051,7 @@
     d.armandoExcel = true;
     boton.disabled = true;
     boton.textContent = "Armando el Excel…";
+    var listo = empezarCarga("Armando el Excel viaje a viaje…");
     try {
       var res = await Promise.all([
         cargarExcelJS(),
@@ -3716,6 +4077,7 @@
     } catch (err) {
       aviso("No se pudo armar el Excel: " + textoError(err), "mal");
     } finally {
+      listo();
       d.armandoExcel = false;
       boton.textContent = "Excel viaje a viaje";
       boton.disabled = !(state.dia.filas && state.dia.filas.length);
@@ -3782,6 +4144,7 @@
     inf.cargando = true;
     inf.progreso = 0;
     var turno = inf.turno = (inf.turno || 0) + 1;
+    var listo = empezarCarga("Haciendo el informe del " + fechaCorta(desde) + " al " + fechaCorta(hasta) + "…");
     $("infExcel").disabled = true;
     pintarInforme();
     try {
@@ -3794,6 +4157,7 @@
         return client.from("v_tarjeta_viajes").select(CAMPOS_VIAJE).gte("dia", desde).lte("dia", hasta)
           .order("dia").order("interno").order("hora_salida").order("clave");
       }, function (cuantos) {
+        listo.detalle(miles(cuantos) + " viajes hasta ahora");
         if (turno !== inf.turno) return;
         inf.progreso = cuantos;
         pintarInforme();
@@ -3809,6 +4173,7 @@
     } catch (err) {
       if (turno === inf.turno) inf.error = err;
     } finally {
+      listo();
       if (turno === inf.turno) {
         inf.cargando = false;
         $("infExcel").disabled = !inf.filas || !inf.filas.length;
@@ -3922,6 +4287,7 @@
     var boton = $("infExcel");
     boton.disabled = true;
     boton.textContent = "Armando el Excel…";
+    var listo = empezarCarga("Armando el Excel del informe…");
     try {
       var por = POR[inf.por];
       var filas = filasInforme();
@@ -3981,6 +4347,7 @@
     } catch (err) {
       aviso("No se pudo armar el Excel: " + textoError(err), "mal");
     } finally {
+      listo();
       boton.disabled = false;
       boton.textContent = "Descargar Excel";
     }
@@ -4136,6 +4503,22 @@
       }
     });
     alCambiarFechas(["busFecha"], function () { if ($("busNumero").value.trim()) $("busForm").requestSubmit(); });
+    // escoger la base deja sus buses en la lista y, si el bus abierto no es de esa base, abre el primero
+    $("busBase").addEventListener("change", function () {
+      var b = state.bus;
+      b.filtroBase = this.value;
+      state.dia.base = state.inf.base = this.value;
+      guardarBase(this.value);
+      pintarListaBuses(b.interno);
+      var buses = busesDeLaLista(b.listaFecha);
+      if (this.value && b.interno && buses[b.interno] !== this.value && b.listaBuses.length) {
+        var primero = b.listaBuses.filter(function (k) { return buses[k] === b.filtroBase; })[0];
+        if (primero) irAlBus(primero);
+      }
+    });
+    $("busNumero").addEventListener("change", function () { irAlBus(this.value); });
+    $("busAntes").addEventListener("click", function () { moverBus(-1); });
+    $("busDespues").addEventListener("click", function () { moverBus(1); });
     $("busExcel").addEventListener("click", excelBus);
     $("busImprimir").addEventListener("click", function () { window.print(); });
 
@@ -4285,7 +4668,7 @@
 
     // El día de hoy se vuelve a pedir solo cada 2 minutos mientras se ve (en el Día o en Por base).
     setInterval(function () {
-      if (state.user && (state.vista === "dia" || state.vista === "bases") && !document.hidden && state.dia.fecha === diaDeHoy() && !state.dia.cargando) cargarDia();
+      if (state.user && (state.vista === "dia" || state.vista === "bases") && !document.hidden && state.dia.fecha === diaDeHoy() && !state.dia.cargando) cargarDia(true);
     }, cfg.REFRESCO_MS);
 
     client.auth.getSession().then(function (r) {
