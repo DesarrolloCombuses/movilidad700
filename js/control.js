@@ -487,6 +487,82 @@
     if (state.mov.desde) document.querySelector('[data-pestana="movilidad"]').href = "#/movilidad/" + state.mov.desde + "/" + state.mov.hasta;
   }
 
+  // ================================================================ la plata del conductor, repartida
+  // Igual que Mi tarjeta del portal del conductor (v1.16.1): los pasajeros que dice el conductor (máximo 19,
+  // el cupo del bus) se reparten entre los que pagaron con tiquete, con la cívica y en efectivo, más el personal
+  // de la empresa (va en los pasajeros, no paga). Los tres valen el pasaje. Las cívicas de un viaje son la
+  // lectura del despacho siguiente menos la suya (civicas de la vista). Ej.: 19 pasajeros, 4 tiquetes y 1 cívica
+  // a $20.000 = $380.000: $80.000 en tiquetes, $20.000 en cívica y $280.000 en efectivo (14). Mientras no hay
+  // lectura siguiente, lo que no es tiquete va junto: "cívica o efectivo".
+  var CUPO = 19;
+
+  function civicasDe(f) { return f.civicas == null || n(f.civicas) < 0 ? null : n(f.civicas); }
+  function enCivicas(k) { return k === 1 ? "1 cívica" : k + " cívicas"; }
+  function listaY(partes) {
+    return partes.length < 2 ? partes.join("") : partes.slice(0, -1).join(", ") + " y " + partes[partes.length - 1];
+  }
+
+  // Las partes nunca pasan de los que se cobran (así suman el total); sobran dice cuántos tiquetes y cívicas
+  // hay de más. null si no hay pasajeros.
+  function repartir(pasajeros, personal, tiquetes, civicas, tarifa) {
+    if (pasajeros == null) return null;
+    var pas = n(pasajeros);
+    var per = Math.min(n(personal), pas);
+    var r = {
+      pasajeros: pas, personal: per, cobran: pas - per, tarifa: tarifa == null ? null : n(tarifa),
+      tiquetes: null, civicas: null, efectivo: null, sinTiquete: null, sobran: 0,
+      tiquetesEscritos: null, civicasLeidas: civicas == null ? null : n(civicas),
+    };
+    r.total = r.tarifa == null ? null : r.cobran * r.tarifa;
+    if (tiquetes == null) return r;
+    r.tiquetesEscritos = n(tiquetes);
+    r.tiquetes = Math.min(r.tiquetesEscritos, r.cobran);
+    r.sobran = Math.max(0, r.tiquetesEscritos + (r.civicasLeidas || 0) - r.cobran);
+    if (r.civicasLeidas == null) {
+      r.sinTiquete = r.cobran - r.tiquetes;
+    } else {
+      r.civicas = Math.min(r.civicasLeidas, r.cobran - r.tiquetes);
+      r.efectivo = r.cobran - r.tiquetes - r.civicas;
+    }
+    return r;
+  }
+  function plataDe(r, k) { return r.tarifa == null || k == null ? null : k * r.tarifa; }
+  function repartoDeViaje(f) {
+    return repartir(f.pasajeros_conductor, f.personal, f.tiquetes_escaneados, civicasDe(f), f.tarifa);
+  }
+
+  // "4 tiquetes y 18 cívicas son más que los 19 pasajeros"
+  function textoSobran(r) {
+    var partes = [r.tiquetesEscritos + (r.tiquetesEscritos === 1 ? " tiquete" : " tiquetes")];
+    if (r.civicasLeidas != null) partes.push(enCivicas(r.civicasLeidas));
+    if (r.personal) partes.push(r.personal + " del personal");
+    return listaY(partes) + " son más que los " + r.pasajeros + " pasajeros";
+  }
+  // Lo que está mal en la cuenta del conductor ("" si nada): más de 19, o más tiquetes y cívicas que pasajeros.
+  function cuentaMal(r) {
+    if (!r) return "";
+    if (r.pasajeros > CUPO) return r.pasajeros + " pasajeros: el cupo del bus es " + CUPO;
+    return r.sobran ? "No cuadra: " + textoSobran(r) : "";
+  }
+  // "19 pasajeros = 4 con tiquete ($80.000) + 1 con cívica ($20.000) + 14 en efectivo ($280.000)."
+  function textoCuenta(r) {
+    function con(k, que) { return k + " " + que + (r.tarifa != null ? " (" + pesos(k * r.tarifa) + ")" : ""); }
+    if (r.tiquetes == null) {
+      return r.pasajeros + " pasajeros" + (r.total != null ? " = " + pesos(r.total) : "") +
+        ". Con los tiquetes se reparten en tiquete, cívica y efectivo.";
+    }
+    var partes = [con(r.tiquetes, "con tiquete")];
+    if (r.civicas == null) {
+      partes.push(con(r.sinTiquete, "en cívica o efectivo"));
+    } else {
+      partes.push(con(r.civicas, "con cívica"));
+      partes.push(con(r.efectivo, "en efectivo"));
+    }
+    if (r.personal) partes.push(r.personal + " del personal (no se cobra)");
+    return r.pasajeros + " pasajeros = " + partes.join(" + ") +
+      (r.civicas == null ? ". Las cívicas se saben en el próximo despacho." : ".");
+  }
+
   // ================================================================ resumen de un grupo de viajes
   function nuevoResumen(clave) {
     return {
@@ -495,6 +571,8 @@
       conductor: 0, plataConductor: 0, escribio: 0, comparados: 0,
       faltaCivica: 0, faltaPasajeros: 0, faltaTiquetes: 0,
       dif: 0, difPlata: 0, noCuadran: 0, civicas: 0, tiquetes: 0,
+      // la plata del conductor repartida (ver repartir): tiquete, cívica, efectivo y lo que todavía no se sabe
+      conReparto: 0, enTiquetes: 0, enCivica: 0, enEfectivo: 0, porSeparar: 0, sinRepartir: 0, cuentaMal: 0,
       revisarCivica: 0, danos: 0, enCurso: 0, corregidos: 0, sinLlenar: 0, personalEmpresa: 0, personalSinViaje: 0, sinInicio: 0, sonarOtro: 0,
       estadoBus: null, avisosBus: 0,     // cómo está el bus (tarjeta_buses_dia) / cuántos buses con aviso
     };
@@ -525,6 +603,22 @@
     if (f.tiquetes_escaneados == null) r.faltaTiquetes++;
     else r.tiquetes += n(f.tiquetes_escaneados);
     if (f.civicas != null) r.civicas += n(f.civicas);
+    var rp = repartoDeViaje(f);
+    if (rp && rp.tarifa != null) {
+      if (rp.tiquetes == null) {
+        r.sinRepartir += rp.total;
+      } else {
+        r.conReparto++;
+        r.enTiquetes += plataDe(rp, rp.tiquetes);
+        if (rp.civicas == null) {
+          r.porSeparar += plataDe(rp, rp.sinTiquete);
+        } else {
+          r.enCivica += plataDe(rp, rp.civicas);
+          r.enEfectivo += plataDe(rp, rp.efectivo);
+        }
+      }
+    }
+    if (cuentaMal(rp)) r.cuentaMal++;
     if (f.estado_civica === "bajo" || f.estado_civica === "salto") r.revisarCivica++;
     if (f.dano_estado === "reportado") r.danos++;
     if (f.lectura_corregida || f.tiquetes_corregidos || f.pasajeros_conductor_corregidos) r.corregidos++;
@@ -613,6 +707,7 @@
     if (r.sonarOtro) chips.push(chip("revisa", "Sonar con otro conductor"));
     if (r.danos) chips.push(chip("revisa", r.danos === 1 ? "Daño por revisar" : r.danos + " daños por revisar"));
     if (r.noCuadran) chips.push(chip("mal", r.noCuadran === 1 ? "1 viaje no cuadra" : r.noCuadran + " viajes no cuadran"));
+    if (r.cuentaMal) chips.push(chip("mal", r.cuentaMal === 1 ? "1 viaje con la cuenta mal" : r.cuentaMal + " viajes con la cuenta mal"));
     if (r.revisarCivica) chips.push(chip("revisa", "Cívica por revisar"));
     var faltas = [];
     if (r.faltaCivica) faltas.push("cívica " + r.faltaCivica);
@@ -631,7 +726,7 @@
   // Para ordenar por estado: lo más grave arriba.
   function gravedad(r) {
     var avisos = conAviso(r.estadoBus) ? 1 : r.avisosBus;
-    return avisos * 10000 + r.danos * 1000 + n(r.sinInicio) * 500 + r.noCuadran * 100 + r.revisarCivica * 10 +
+    return avisos * 10000 + r.danos * 1000 + n(r.sinInicio) * 500 + (r.noCuadran + r.cuentaMal) * 100 + r.revisarCivica * 10 +
       (r.faltaCivica + r.faltaPasajeros + r.faltaTiquetes);
   }
 
@@ -647,7 +742,8 @@
       '<td class="n">' + pesos(r.plataSensor) + "</td>" +
       '<td class="n">' + (r.escribio ? r.conductor : "—") +
         (r.faltaPasajeros ? '<span class="menor">falta en ' + r.faltaPasajeros + "</span>" : "") + "</td>" +
-      '<td class="n">' + (r.escribio ? pesos(r.plataConductor) : "—") + "</td>" +
+      '<td class="n">' + (r.escribio ? pesos(r.plataConductor) : "—") +
+        (r.conReparto ? '<span class="menor">efectivo ' + pesos(r.enEfectivo) + "</span>" : "") + "</td>" +
       celdaDif(r) +
       '<td class="n">' + r.civicas + "</td>" +
       '<td class="n">' + r.tiquetes + "</td>";
@@ -663,11 +759,22 @@
       caja("Según el sensor", pesos(r.plataSensor), r.sensor + " pasajeros") +
       caja("Según los conductores", r.escribio ? pesos(r.plataConductor) : "—",
         r.escribio ? r.conductor + " pasajeros" + (r.faltaPasajeros ? " · faltan " + r.faltaPasajeros + " viajes" : "") : "todavía no han escrito") +
+      caja("Efectivo según los conductores", r.conReparto ? pesos(r.enEfectivo) : "—", textoRepartoTotal(r),
+        r.cuentaMal ? "revisa" : "") +
       caja("Diferencia", r.comparados ? pesosDif(r.difPlata) : "—",
         r.comparados ? numDif(r.dif) + " pasajeros · " + (r.noCuadran === 1 ? "1 viaje no cuadra" : r.noCuadran + " viajes no cuadran") : "sin viajes para comparar",
         !r.comparados ? "" : r.difPlata < 0 ? "mal" : r.difPlata > 0 ? "revisa" : "bien") +
       caja("Cívicas", r.civicas, r.faltaCivica ? "falta la lectura en " + r.faltaCivica : "todas leídas") +
       caja("Tiquetes", r.tiquetes, r.faltaTiquetes ? "faltan en " + r.faltaTiquetes + " viajes" : "todos escritos");
+  }
+
+  // Debajo del efectivo: "tiquetes $340.000 · cívica $20.000", y lo que todavía no se sabe.
+  function textoRepartoTotal(r) {
+    if (!r.conReparto) return r.escribio ? "faltan los tiquetes para repartir" : "todavía no han escrito";
+    return "tiquetes " + pesos(r.enTiquetes) + " · cívica " + pesos(r.enCivica) +
+      (r.porSeparar ? " · " + pesos(r.porSeparar) + " cívica o efectivo, se separa en el próximo despacho" : "") +
+      (r.sinRepartir ? " · " + pesos(r.sinRepartir) + " sin repartir (faltan tiquetes)" : "") +
+      (r.cuentaMal ? " · " + (r.cuentaMal === 1 ? "1 viaje" : r.cuentaMal + " viajes") + " con la cuenta mal" : "");
   }
 
   function thOrden(campo, titulo, orden, num) {
@@ -1769,7 +1876,7 @@
       '<td class="n">' + (dif == null ? "—" : '<span class="' + claseDif(dif) + '">' + numDif(dif) + '</span><span class="menor">' +
         pesosDif(n(f.diferencia_plata)) + "</span>") + "</td>" +
       '<td class="n">' + (f.plata_conductor != null ? pesos(n(f.plata_conductor)) : "—") +
-        '<span class="menor">sensor ' + pesos(n(f.plata_sensor)) + "</span></td>" +
+        '<span class="menor">sensor ' + pesos(n(f.plata_sensor)) + "</span>" + repartoCelda(f) + "</td>" +
       "<td>" + (f.civica_lectura != null
         ? '<strong class="num">' + esc(f.civica_lectura) + "</strong>" + (f.civicas != null ? " · " + esc(f.civicas) + " cívicas" : "") +
           (f.lectura_corregida ? '<span class="menor">corregida</span>' : "") + '<div class="chips">' + chip(est[0], est[1]) + "</div>"
@@ -1783,6 +1890,26 @@
         }).join("") + "</td>" +
       '<td class="no-imprimir"><button class="btn-link" type="button" tabindex="-1">' + (abierto ? "Cerrar" : "Ver") + "</button></td>" +
       "</tr>";
+  }
+
+  // En la tarjeta del bus, debajo de "$ Conductor": tiquetes, cívica y efectivo de ese viaje (cuántos y cuánto).
+  function repartoCelda(f) {
+    var rp = repartoDeViaje(f);
+    if (!rp) return "";
+    var mal = cuentaMal(rp);
+    var html = "";
+    if (rp.tarifa != null && rp.tiquetes != null) {
+      var linea = function (que, k, clase) {
+        return '<span class="menor reparto' + (clase ? " " + clase : "") + '">' + que + " " + k + " · " + pesos(plataDe(rp, k)) + "</span>";
+      };
+      html += linea("tiquetes", rp.tiquetes);
+      if (rp.civicas == null) {
+        html += linea("cívica o efectivo", rp.sinTiquete) + '<span class="menor">se separa en el próximo despacho</span>';
+      } else {
+        html += linea("cívica", rp.civicas) + linea("efectivo", rp.efectivo, "reparto-efectivo");
+      }
+    }
+    return html + (mal ? '<div class="chips">' + chip("mal", mal) + "</div>" : "");
   }
 
   function detalleViaje(f) {
@@ -2066,6 +2193,7 @@
       '<form id="formCorregir" novalidate>' +
         '<label class="campo"><span>' + esc(t.etiqueta) + (vigente ? " correcto" : "") + "</span>" +
           '<input id="corrValor" inputmode="numeric" autocomplete="off" maxlength="' + t.largo + '"></label>' +
+        '<div id="corrCuenta" class="cuenta-vivo" aria-live="polite"></div>' +
         '<label class="campo" style="margin-top:10px"><span>¿Por qué? (obligatorio)</span>' +
           '<textarea id="corrMotivo" maxlength="300" placeholder="Ej.: en la foto del validador se lee 2090"></textarea></label>' +
         '<p id="corrError" class="error" hidden style="margin-top:10px"></p>' +
@@ -2073,7 +2201,10 @@
         '<button class="btn" type="button" data-cerrar-hoja>Cancelar</button></div>' +
       "</form>",
       function (caja) {
-        caja.querySelector("#corrValor").addEventListener("input", function (ev) { ev.target.value = ev.target.value.replace(/\D/g, ""); });
+        caja.querySelector("#corrValor").addEventListener("input", function (ev) {
+          ev.target.value = ev.target.value.replace(/\D/g, "");
+          pintarCuentaCorreccion(tipo, f);
+        });
         caja.querySelector("#formCorregir").addEventListener("submit", function (ev) {
           ev.preventDefault();
           guardarCorreccion(tipo, f, vigente);
@@ -2081,13 +2212,60 @@
       });
   }
 
+  // La cuenta del viaje con el número que va escribiendo, como en Mi tarjeta del portal. Pasajeros y tiquetes:
+  // más de 19, o más tiquetes y cívicas que pasajeros, no deja guardar. La cívica cambia las cívicas de este
+  // viaje y del anterior: se dice cómo quedan, y si no cuadran solo avisa (el número del validador es el real).
+  function cuentaCorreccion(tipo, f, texto) {
+    var valor = texto === "" || texto == null ? null : Number(texto);
+    var lineas = [], avisos = [], mal = "";
+    if (valor == null) return { lineas: lineas, avisos: avisos, mal: mal };
+    if (tipo === "pasajeros" || tipo === "tiquetes") {
+      var pas = tipo === "pasajeros" ? valor : f.pasajeros_conductor;
+      var tiq = tipo === "tiquetes" ? valor : f.tiquetes_escaneados;
+      if (valor > CUPO) {
+        mal = "Máximo " + CUPO + " " + (tipo === "pasajeros" ? "pasajeros" : "tiquetes") + ": es el cupo del bus.";
+      } else if (pas != null) {
+        var r = repartir(pas, f.personal, tiq, civicasDe(f), f.tarifa);
+        if (r.sobran) mal = "No cuadra: " + textoSobran(r) + ". Revise los números (o corrija primero la cívica).";
+        else lineas.push(textoCuenta(r));
+      }
+      return { lineas: lineas, avisos: avisos, mal: mal };
+    }
+    // la cívica: los viajes vecinos del bus, por hora de salida
+    var orden = state.bus.filas.slice().sort(function (a, b) { return String(a.hora_salida).localeCompare(String(b.hora_salida)); });
+    var k = orden.indexOf(f);
+    var sig = orden[k + 1], ant = orden[k - 1];
+    var cuenta = function (x, civ, quien) {
+      if (x.pasajeros_conductor == null) return;
+      var r = repartir(x.pasajeros_conductor, x.personal, x.tiquetes_escaneados, civ, x.tarifa);
+      var dice = quien + " tuvo " + enCivicas(civ);
+      if (r.sobran) avisos.push(dice + " y no cuadra: " + textoSobran(r) + ".");
+      else lineas.push(dice + ": " + textoCuenta(r));
+    };
+    if (sig && sig.civica_lectura != null && n(sig.civica_lectura) >= valor) cuenta(f, n(sig.civica_lectura) - valor, "Este viaje");
+    if (ant && ant.civica_lectura != null && valor >= n(ant.civica_lectura)) {
+      cuenta(ant, valor - n(ant.civica_lectura), ant.sin_despacho ? "El viaje anterior (sin despacho)" : "El viaje anterior (" + ant.viaje + ")");
+    }
+    return { lineas: lineas, avisos: avisos, mal: mal };
+  }
+
+  function pintarCuentaCorreccion(tipo, f) {
+    var caja = $("corrCuenta");
+    if (!caja) return;
+    var c = cuentaCorreccion(tipo, f, $("corrValor").value.trim());
+    caja.innerHTML = (c.mal ? '<p class="cuenta-mal">' + esc(c.mal) + "</p>" : "") +
+      c.lineas.map(function (l) { return '<p class="cuenta-linea">' + esc(l) + "</p>"; }).join("") +
+      c.avisos.map(function (l) { return '<p class="cuenta-aviso">' + esc(l) + "</p>"; }).join("");
+    $("corrGuardar").disabled = !!c.mal;
+  }
+
   async function guardarCorreccion(tipo, f, vigente) {
     var t = TIPOS[tipo];
     var valor = $("corrValor").value.trim();
     var motivo = $("corrMotivo").value.trim();
     var error = $("corrError");
-    var falla = !valor ? "Escriba el número." : !motivo ? "Escriba por qué." :
-      vigente && Number(valor) === Number(valorDe(tipo, vigente)) ? "Es el mismo número que ya tiene." : "";
+    var falla = !valor ? "Escriba el número." : cuentaCorreccion(tipo, f, valor).mal || (!motivo ? "Escriba por qué." :
+      vigente && Number(valor) === Number(valorDe(tipo, vigente)) ? "Es el mismo número que ya tiene." : "");
     if (falla) {
       error.textContent = falla;
       error.hidden = false;
@@ -3729,6 +3907,7 @@
 
   // ---------------------------------------------------------------- Excel e imprimir
   function filaExcel(f) {
+    var rp = repartoDeViaje(f);
     return {
       "Día": f.dia, "Bus": f.interno, "Placa": f.placa || "", "Base": f.base || "",
       "Viaje": f.sin_despacho ? "SIN DESPACHO" : f.viaje,
@@ -3744,6 +3923,11 @@
       "$ sensor": f.plata_sensor == null ? "" : n(f.plata_sensor),
       "$ conductor": f.plata_conductor == null ? "" : n(f.plata_conductor),
       "Diferencia $": f.diferencia_plata == null ? "" : n(f.diferencia_plata),
+      "$ tiquetes": rp && rp.tiquetes != null && rp.tarifa != null ? plataDe(rp, rp.tiquetes) : "",
+      "$ cívica": rp && rp.civicas != null && rp.tarifa != null ? plataDe(rp, rp.civicas) : "",
+      "$ efectivo": rp && rp.efectivo != null && rp.tarifa != null ? plataDe(rp, rp.efectivo) : "",
+      "$ cívica o efectivo (sin separar)": rp && rp.sinTiquete != null && rp.tarifa != null ? plataDe(rp, rp.sinTiquete) : "",
+      "Cuenta del conductor": cuentaMal(rp),
       "Cívica (lectura)": f.civica_lectura == null ? "" : n(f.civica_lectura),
       "Cívicas": f.civicas == null ? "" : n(f.civicas),
       "Estado cívica": (ESTADO_CIVICA[f.estado_civica] || ["", f.estado_civica || ""])[1],
@@ -4301,6 +4485,12 @@
         fila["$ sensor"] = r.plataSensor;
         fila["Pasajeros conductor"] = r.escribio ? r.conductor : "";
         fila["$ conductor"] = r.escribio ? r.plataConductor : "";
+        fila["$ tiquetes"] = r.conReparto ? r.enTiquetes : "";
+        fila["$ cívica"] = r.conReparto ? r.enCivica : "";
+        fila["$ efectivo"] = r.conReparto ? r.enEfectivo : "";
+        fila["$ cívica o efectivo (sin separar)"] = r.porSeparar || "";
+        fila["$ sin repartir (faltan tiquetes)"] = r.sinRepartir || "";
+        fila["Viajes con la cuenta mal"] = r.cuentaMal;
         fila["Viajes sin pasajeros del conductor"] = r.faltaPasajeros;
         fila["Diferencia pasajeros"] = r.comparados ? r.dif : "";
         fila["Diferencia $"] = r.comparados ? r.difPlata : "";

@@ -203,6 +203,15 @@ tbody tr.fila-link { cursor: pointer; }
 tbody tr.fila-link:hover td { background: #f3f8f1; }
 tfoot td { background: var(--panel-2); font-weight: 800; border-top: 2px solid var(--line-strong); border-bottom: 0; }
 .menor { display: block; font-size: 12.5px; color: var(--muted); font-weight: 500; }
+/* La plata del conductor repartida (tarjeta del bus) y la cuenta en vivo al corregir */
+.menor.reparto { color: var(--ink-2, var(--ink)); }
+.menor.reparto-efectivo { font-weight: 700; color: var(--primary-strong); }
+.cuenta-vivo { margin-top: 10px; }
+.cuenta-vivo:empty { display: none; }
+.cuenta-vivo p { margin: 0 0 4px; font-size: 14px; line-height: 1.4; }
+.cuenta-vivo .cuenta-linea { font-weight: 650; color: var(--primary-strong); }
+.cuenta-vivo .cuenta-mal { font-weight: 700; color: var(--danger); }
+.cuenta-vivo .cuenta-aviso { font-weight: 600; color: var(--warn-ink); }
 .bus-num { font-size: 16px; font-weight: 800; }
 .vacio { padding: 28px 18px; text-align: center; color: var(--muted); }
 

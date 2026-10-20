@@ -218,6 +218,24 @@ del día siguiente antes de las 2:30. Con los datos reales: 19-oct 90 de 90; 18-
   **CONDUCTOR REPORTA pasajeros** y **CONDUCTOR REPORTA tiquetes**, con lo que el conductor escribió en su tarjeta del
   portal. Vacías si no lo ha escrito. Van también en la hoja Resumen por viaje.
 
+### La plata del conductor repartida: tiquete, cívica y efectivo (v0.16.0)
+
+Igual que Mi tarjeta del portal del conductor (v1.16.1). Los pasajeros que dice el conductor (máximo 19, el cupo del
+bus) se reparten entre los que pagaron con **tiquete**, con la **cívica** y en **efectivo**, más el personal de la
+empresa (no paga). Los tres valen el pasaje. Las cívicas de un viaje son la lectura del despacho siguiente menos la
+suya. Ej.: 19 pasajeros, 4 tiquetes y 1 cívica a $20.000 = $80.000 + $20.000 + $280.000 en efectivo (14). Sin lectura
+siguiente, lo que no es tiquete sale como *"cívica o efectivo"* (se separa en el próximo despacho).
+
+- **Totales** (Día, Por base, Informes, tarjeta del bus): caja nueva **Efectivo según los conductores**, con
+  *"tiquetes … · cívica …"* y lo que falta separar o repartir.
+- **Tablas** del Día e Informes: debajo de *$ Conductor*, el efectivo.
+- **Tarjeta del bus:** en cada viaje, debajo de *$ Conductor*, tiquetes, cívica y efectivo (cuántos y cuánto).
+- **Cuenta mal:** más de 19 pasajeros, o más tiquetes y cívicas que pasajeros: chip *"1 viaje con la cuenta mal"*.
+- **Corregir** pasajeros o tiquetes: la cuenta sale mientras se escribe, y más de 19 o una cuenta que no da no deja
+  guardar. Corregir la cívica dice cómo quedan las cívicas de ese viaje y del anterior (si no cuadran, solo avisa).
+- **Excel** de la tarjeta del bus y de Informes: columnas *$ tiquetes*, *$ cívica*, *$ efectivo*, *$ cívica o
+  efectivo (sin separar)* y la cuenta mal.
+
 ### El día de la tarjeta
 
 Es el día de la empresa: **de 2:30 a. m. a 2:30 a. m. del día siguiente**. Un viaje va al día de la hora de su
