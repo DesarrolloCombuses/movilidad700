@@ -27,7 +27,7 @@ Cuando se publica una versión nueva, arriba sale **"Hay una versión nueva del 
 |---|---|
 | **Día** | Todos los buses de un día: viajes, pasajeros y plata del sensor y del conductor, la diferencia, cívicas, tiquetes y qué falta o hay que revisar, en tiempo real (se vuelve a pedir solo cada 2 minutos). Filtros: con aviso, no cuadran, por revisar, sin llenar, sin despacho, por base y por ruta. El botón **Excel viaje a viaje** descarga el día completo como lo arman los auxiliares. |
 | **Por base** | Un renglón por base con sus totales del día (buses, viajes, sensor, lo que dice el conductor, la diferencia, cívicas, tiquetes y estado) y el de todas las bases. Al tocar una base se abre el Día solo con esa base. |
-| **Tarjeta del bus** | La tarjeta de papel completa, viaje por viaje. Al abrir un viaje se ve **el mapa de su recorrido** y por qué itinerario fue, cada apertura de puerta (hora, suben, bajan, dónde, sensor tapado), quién escribió cada número y sus correcciones, y el daño del validador con su foto. Excel e imprimir con firmas. |
+| **Tarjeta del bus** | La tarjeta de papel completa, viaje por viaje. Al abrir un viaje se ve **el mapa de su recorrido** y por qué itinerario fue, cada apertura de puerta (hora, suben, bajan, dónde, bloqueo), quién escribió cada número y sus correcciones, y el daño del validador con su foto. Excel e imprimir con firmas. |
 | **Informes** | Entre dos fechas, agrupado por bus, conductor, ruta, día o base, o de una sola base. Por conductor sale primero el que más plata dice de menos. El Excel trae el resumen, cada viaje, las correcciones, los daños y los avisos de los buses. |
 | **Movilidad** | La "Base de datos" de Movilidad 2026, como la sacaba 700control: un renglón por bus y día, con las mismas 25 columnas, entre dos fechas y con sus filtros. Los despachadores escriben los **ajustes** (taller, administrativo, despachador). **Descargar Excel** la deja igual al maestro, con las fórmulas, para pegar debajo. |
 | **Novedades** | Las que reportan los conductores desde su app: número, hora, bus, qué pasó (trasbordo con cuántos y de qué bus, varado, accidente u otra, con la nota), conductor y dónde. Los despachadores ven el **video** y pueden **anular** una novedad diciendo por qué. Entre dos fechas y por tipo. |
@@ -244,6 +244,12 @@ positivamente") las cívicas de un viaje son su lectura menos la del despacho an
 1 en 2773, viaje 2 en 2773, viaje 3 en 2774 → el 2 tuvo 0 y el 3 tuvo 1. Estados nuevos: "Falta la del viaje
 anterior" y "Sin lectura anterior del bus" (ya no "Se completa en el próximo despacho"). Al corregir una cívica, la
 cuenta en vivo dice cómo quedan este viaje y el siguiente. Igual que el portal del conductor v1.18.0.
+
+### Bloqueo, no "sensor tapado" (v0.17.1)
+
+Desde el 22-oct-2026 (pedido del usuario) donde decía *sensor tapado* dice **bloqueo**: el aviso de la parada en
+*Puerta por puerta*, la nota de abajo, el mapa del recorrido, el Excel de la tarjeta del bus (columna *Bloqueos*) y
+la columna *Bloqueos* del Excel viaje a viaje. Solo cambia la palabra: el dato es el mismo (`tapado`).
 
 ### El día de la tarjeta
 

@@ -4,7 +4,7 @@
 // deciden las reglas de la base con la cuenta con que entra
 // (almacentro/enturnes/sql/tarjeta_despacho.sql).
 window.CONTROL_CONFIG = {
-  VERSION: "v0.17.0",
+  VERSION: "v0.17.1",
   SUPABASE_URL: "https://cbplebkmxrkaafqdhiyi.supabase.co",
   SUPABASE_ANON_KEY: "sb_publishable_DZCceNTENY4ViP17-eZrGg_bdMElZ9X",
 

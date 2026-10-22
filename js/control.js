@@ -1931,12 +1931,12 @@
           var mapa = p.lat != null && p.lon != null
             ? ' <a class="no-imprimir" href="https://www.google.com/maps?q=' + encodeURIComponent(p.lat + "," + p.lon) + '" target="_blank" rel="noopener">mapa</a>' : "";
           return '<tr><td class="num">' + hora(p.hora) + '</td><td class="n">' + (n(p.suben) || "") + '</td><td class="n">' + (n(p.bajan) || "") + "</td>" +
-            "<td>" + esc(p.donde || "") + mapa + (p.tapado ? " " + chip("revisa", "sensor tapado") : "") + "</td></tr>";
+            "<td>" + esc(p.donde || "") + mapa + (p.tapado ? " " + chip("revisa", "bloqueo") : "") + "</td></tr>";
         }).join("") +
         '</tbody><tfoot><tr><td>Total</td><td class="n">' + suben + '</td><td class="n">' + bajan + "</td><td></td></tr></tfoot></table>" +
         '<p class="nota">' + (extra.aperturas ? "La puerta se abrió " + extra.aperturas + " veces (también las que no movieron a nadie). " : "") +
         (n(f.recortados) ? n(f.recortados) + " subidas pasaron del tope de 19. " : "") +
-        (paradas.some(function (p) { return p.tapado; }) ? "Con el sensor tapado, el conteo puede llegar tarde, en la parada siguiente." : "") + "</p>";
+        (paradas.some(function (p) { return p.tapado; }) ? "Con bloqueo, el conteo puede llegar tarde, en la parada siguiente." : "") + "</p>";
     } else {
       izq += '<p class="nota">Este viaje se publicó sin el detalle de cada parada. Aparece cuando el programa del servidor lo vuelva a publicar con la versión nueva.</p>';
     }
@@ -2156,7 +2156,7 @@
         radius: 4 + Math.min(8, Math.sqrt(suben + bajan) * 1.6), color: "#fff", weight: 1.5,
         fillColor: suben ? "#16a34a" : "#d97706", fillOpacity: 0.9,
       }).bindTooltip(hora(p.hora) + (suben ? " · suben " + suben : "") + (bajan ? " · bajan " + bajan : "") +
-        (p.donde ? " · " + p.donde : "") + (p.tapado ? " · sensor tapado" : "")).addTo(mapa);
+        (p.donde ? " · " + p.donde : "") + (p.tapado ? " · bloqueo" : "")).addTo(mapa);
       limites.push([p.lat, p.lon]);
     });
     // Donde el conductor leyó el código de un gestor
@@ -3968,7 +3968,7 @@
     b.filas.forEach(function (f) {
       ((b.extra[f.clave] || {}).detalle || []).forEach(function (p) {
         paradas.push({ "Viaje": f.sin_despacho ? "SIN DESPACHO" : f.viaje, "Salió": hora(f.hora_salida), "Hora": hora(p.hora),
-          "Suben": n(p.suben), "Bajan": n(p.bajan), "Dónde": p.donde || "", "Sensor tapado": p.tapado ? "sí" : "",
+          "Suben": n(p.suben), "Bajan": n(p.bajan), "Dónde": p.donde || "", "Bloqueos": p.tapado ? "sí" : "",
           "Latitud": p.lat, "Longitud": p.lon });
       });
     });
@@ -4086,7 +4086,7 @@
       var primero = 0, ultimo = 0, entran = 0, salen = 0;
       eventos.forEach(function (e) {
         var r = V.poner([f.interno, null, fechaVaV(e.hora), horaVaV(e.hora), n(e.suben), n(e.bajan), null, null, null, null,
-          null, null, null, e.tapado ? "Sensor tapado" : null, e.donde || null, f.conductor || null, null, n(e.gestores) || null,
+          null, null, null, e.tapado ? "Bloqueo" : null, e.donde || null, f.conductor || null, null, n(e.gestores) || null,
           null],
           n(e.suben) ? COLOR_VAV.verde : null);
         if (!primero) primero = r;
