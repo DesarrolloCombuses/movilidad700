@@ -101,7 +101,7 @@ textarea { min-height: 70px; resize: vertical; width: 100%; }
 }
 .pestanas { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; }
 .pestanas a {
-  padding: 8px 14px; border-radius: var(--radius-sm);
+  padding: 8px 10px; border-radius: var(--radius-sm);
   color: var(--ink-2); font-weight: 650; text-decoration: none; white-space: nowrap;
 }
 .pestanas a:hover { background: var(--panel-2); }

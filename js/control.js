@@ -89,6 +89,9 @@
       error: null, cargando: false, progreso: 0, orden: null },
     // Personal de la empresa (sql v10): quién leyó el código del bus, en qué viaje (la pestaña Personal)
     ges: { fecha: null, registros: null, fotos: {}, error: null, cargando: false },
+    // Por conductor (sql v15): de los que trabajaron según el biométrico, quién llenó la tarjeta y quién no
+    con: { fecha: null, personas: null, error: null, cargando: false, base: baseGuardada(), estado: "", sinFuncion: false,
+      sinMarcaNiViajes: 0 },
     // Novedades del conductor (sql v11): trasbordo, varado, accidente u otra, con su video
     nov: { desde: null, hasta: null, lista: null, error: null, cargando: false, hay: true, tipo: "", limpiado: false },
     // Movilidad: la Base de datos de Movilidad 2026 (movilidad.sql: ajustes y archivos planos)
@@ -439,12 +442,14 @@
   function enrutar() {
     if (!state.user) return;
     var partes = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
-    var vista = ["dia", "bases", "bus", "informes", "movilidad", "gestores", "novedades"].indexOf(partes[0]) >= 0 ? partes[0] : "dia";
+    var vista = ["dia", "bases", "conductores", "bus", "informes", "movilidad", "gestores", "novedades"].indexOf(partes[0]) >= 0 ? partes[0] : "dia";
     mostrarVista(vista);
     if (vista === "dia") {
       abrirDia(esFecha(partes[1]) ? partes[1] : state.dia.fecha || diaDeHoy());
     } else if (vista === "bases") {
       abrirBases(esFecha(partes[1]) ? partes[1] : state.dia.fecha || diaDeHoy());
+    } else if (vista === "conductores") {
+      abrirConductores(esFecha(partes[1]) ? partes[1] : state.con.fecha || state.dia.fecha || diaDeHoy());
     } else if (vista === "bus") {
       abrirBus(partes[1] || state.bus.interno, esFecha(partes[2]) ? partes[2] : state.bus.fecha || state.dia.fecha || diaDeHoy());
     } else if (vista === "gestores") {
@@ -466,6 +471,7 @@
     state.vista = vista;
     $("vistaDia").hidden = vista !== "dia";
     $("vistaBases").hidden = vista !== "bases";
+    $("vistaConductores").hidden = vista !== "conductores";
     $("vistaBus").hidden = vista !== "bus";
     $("vistaInformes").hidden = vista !== "informes";
     $("vistaGestores").hidden = vista !== "gestores";
@@ -484,6 +490,7 @@
     var bus = document.querySelector('[data-pestana="bus"]');
     if (state.dia.fecha) dia.href = "#/dia/" + state.dia.fecha;
     if (state.dia.fecha) document.querySelector('[data-pestana="bases"]').href = "#/bases/" + state.dia.fecha;
+    if (state.con.fecha || state.dia.fecha) document.querySelector('[data-pestana="conductores"]').href = "#/conductores/" + (state.con.fecha || state.dia.fecha);
     if (state.bus.interno) bus.href = "#/bus/" + encodeURIComponent(state.bus.interno) + "/" + state.bus.fecha;
     if (state.ges.fecha) document.querySelector('[data-pestana="gestores"]').href = "#/gestores/" + state.ges.fecha;
     if (state.nov.desde) document.querySelector('[data-pestana="novedades"]').href = "#/novedades/" + state.nov.desde + "/" + state.nov.hasta;
@@ -2534,6 +2541,295 @@
         }).join("") + "</tbody></table></div>";
     }
     cuerpo.innerHTML = html;
+  }
+
+  // ================================================================ POR CONDUCTOR (sql v15)
+  // Pedido del usuario el 22-oct-2026: "en el portal de control necesito saber quién llenó la tarjeta y quién no, de
+  // acuerdo al biométrico, los que trabajaron". Trabajaron = los conductores con ENTRADA en asistencias ese día. Cada
+  // viaje es de quien diga tarjeta_viajes_conductor (sql v15, la misma regla de la liquidación del portal): el último
+  // conductor del bus que marcó entrada antes de que el bus saliera; si nadie había marcado, el del turno programado.
+  // Ej. bus 722: el del turno 1 hizo 6 viajes y no llenó ninguno (No llenó); el del turno 2 hizo 5 y llenó los 5
+  // (Llenó todo). Como en "Sin llenar", solo cuentan los viajes que ya llegaron.
+  var ESTADOS_CON = {
+    nada: { orden: 0, tono: "mal", texto: "No llenó" },
+    medias: { orden: 1, tono: "revisa", texto: "A medias" },
+    camino: { orden: 2, tono: "info", texto: "En camino" },
+    sin: { orden: 3, tono: "", texto: "Sin viajes" },
+    lleno: { orden: 4, tono: "ok", texto: "Llenó todo" },
+  };
+
+  function abrirConductores(fecha) {
+    var c = state.con;
+    var cambio = c.fecha !== fecha;
+    c.fecha = fecha;
+    $("conFecha").value = fecha;
+    actualizarPestanas();
+    if (cambio || !c.personas) {
+      c.personas = null;
+      c.error = null;
+      c.sinFuncion = false;
+      pintarConductores();
+      cargarConductores();
+    } else {
+      pintarConductores();
+    }
+  }
+
+  function sinLaFuncion(err) {
+    var m = (err && ((err.code || "") + " " + (err.message || ""))) || "";
+    return /PGRST202|could not find the function/i.test(m);
+  }
+
+  async function cargarConductores(sola) {
+    var c = state.con, fecha = c.fecha;
+    var listo = sola ? sinCarga : empezarCarga("Trayendo los conductores del " + fechaLarga(fecha).toLowerCase() + "…");
+    c.cargando = true;
+    $("conActualizar").disabled = true;
+    try {
+      var manana = sumarDias(fecha, 1), corte = horaCorte();
+      var res = await Promise.all([
+        traerTodo(function () { return client.rpc("tarjeta_viajes_conductor", { p_dia: fecha }).order("clave"); })
+          .catch(function (err) { return { error: err }; }),
+        traerTodo(function () {
+          return client.from("v_tarjeta_viajes")
+            .select("clave,interno,viaje,sin_despacho,hora_salida,estado_calculo,civica_lectura,pasajeros_conductor,tiquetes_escaneados")
+            .eq("dia", fecha).order("clave");
+        }),
+        traerTodo(function () {
+          return client.from("asistencias").select("id,sentido,origen,fecha,hora,colaboradores(dni,nombre,especialidad)")
+            .gte("fecha", fecha).lte("fecha", manana).order("fecha").order("hora").order("id");
+        }),
+        traerTodo(function () {
+          return client.from("programacion_turnos").select("dni,vehiculo,turno,base,nombre_programacion,hora_entrada,hora_salida")
+            .eq("fecha", fecha).order("vehiculo").order("turno");
+        }),
+      ]);
+      if (c.fecha !== fecha) return;
+      if (res[0].error) {
+        if (sinLaFuncion(res[0].error)) { c.sinFuncion = true; c.personas = null; c.error = null; return; }
+        throw res[0].error;
+      }
+      c.sinFuncion = false;
+      armarConductores(c, res[0], res[1], res[2], res[3], manana, corte);
+      c.error = null;
+    } catch (err) {
+      if (c.fecha === fecha) c.error = err;
+    } finally {
+      listo();
+      c.cargando = false;
+      $("conActualizar").disabled = false;
+      if (state.vista === "conductores" && c.fecha === fecha) pintarConductores();
+    }
+  }
+
+  function armarConductores(c, duenos, viajes, marcas, turnos, manana, corte) {
+    var porDni = {};
+    function cedula(x) { return String(x == null ? "" : x).replace(/\D/g, ""); }
+    function persona(dni) {
+      return porDni[dni] || (porDni[dni] = { dni: dni, nombre: "", bus: "", turno: null, base: "", prog: "",
+        entrada: null, salida: null, viajes: [], programado: false, conductor: false });
+    }
+    // La programación: su bus, su turno y su base (si tiene dos turnos el mismo día, queda el primero).
+    turnos.forEach(function (x) {
+      var dni = cedula(x.dni);
+      if (!dni || (porDni[dni] && porDni[dni].programado)) return;
+      var p = persona(dni);
+      p.programado = p.conductor = true;
+      p.nombre = x.nombre_programacion || p.nombre;
+      p.bus = String(x.vehiculo == null ? "" : x.vehiculo).trim();
+      p.turno = x.turno;
+      p.base = x.base ? nombreBase(x.base) : SIN_BASE;
+      p.prog = String(x.hora_entrada || "").slice(0, 5) + "–" + String(x.hora_salida || "").slice(0, 5);
+    });
+    // El biométrico: la primera entrada del día y la última salida después de ella (el día va de corte a corte).
+    marcas.forEach(function (x) {
+      if (x.fecha === manana && String(x.hora) >= corte) return;
+      var col = x.colaboradores || {};
+      var dni = cedula(col.dni);
+      if (!dni) return;
+      if (!porDni[dni] && !/conduc/i.test(col.especialidad || "")) return;    // otro cargo: gestores, oficina
+      var p = persona(dni);
+      p.conductor = true;
+      if (!p.nombre) p.nombre = col.nombre || "";
+      if (x.sentido === "entrada" && !p.entrada) p.entrada = x;
+      else if (x.sentido === "salida" && p.entrada) p.salida = x;
+    });
+    // Los viajes de cada uno (sql v15).
+    var porClave = {};
+    viajes.forEach(function (f) { porClave[f.clave] = f; });
+    var sinDueno = 0;
+    duenos.forEach(function (x) {
+      var f = porClave[x.clave];
+      if (!f) return;
+      var dni = cedula(x.dni);
+      if (!dni) { sinDueno++; return; }
+      var p = persona(dni);
+      p.conductor = true;
+      if (!p.nombre) p.nombre = x.nombre || "";
+      if (!p.bus) { p.bus = String(f.interno); p.turno = x.turno; }
+      p.viajes.push(Object.assign({ segun: x.segun }, f));
+    });
+    var todas = Object.keys(porDni).map(function (k) { return porDni[k]; }).filter(function (p) { return p.conductor; });
+    c.sinMarcaNiViajes = todas.filter(function (p) { return !p.entrada && !p.viajes.length; }).length;
+    c.sinDueno = sinDueno;
+    c.personas = todas.filter(function (p) { return p.entrada || p.viajes.length; });
+    c.personas.forEach(function (p) {
+      if (!p.base) p.base = SIN_BASE;
+      p.viajes.sort(function (a, b) { return String(a.hora_salida).localeCompare(String(b.hora_salida)); });
+      var llegaron = p.viajes.filter(function (f) { return f.estado_calculo !== "en_curso"; });
+      var faltan = { "cívica": 0, pasajeros: 0, tiquetes: 0 };
+      var llenos = 0, conAlgo = 0;
+      llegaron.forEach(function (f) {
+        var falta = faltaEnViaje(f);
+        falta.forEach(function (k) { faltan[k]++; });
+        if (!falta.length) llenos++;
+        if (falta.length < 3) conAlgo++;
+      });
+      p.llegaron = llegaron.length;
+      p.llenos = llenos;
+      p.faltan = faltan;
+      p.enCamino = p.viajes.length - llegaron.length;
+      p.estado = !p.viajes.length ? "sin" : !llegaron.length ? "camino" : llenos === llegaron.length ? "lleno"
+        : conAlgo === 0 ? "nada" : "medias";
+    });
+    c.personas.sort(function (a, b) {
+      return ESTADOS_CON[a.estado].orden - ESTADOS_CON[b.estado].orden || compararBases(a.base, b.base) ||
+        compararInternos(a.bus, b.bus) || n(a.turno) - n(b.turno);
+    });
+  }
+
+  // "cívica 3 · pasajeros 4 · tiquetes 4" (en cuántos viajes que ya llegaron falta cada cosa)
+  function textoFaltanCon(p) {
+    var partes = [];
+    Object.keys(p.faltan).forEach(function (k) { if (p.faltan[k]) partes.push(k + " " + p.faltan[k]); });
+    return partes.join(" · ");
+  }
+
+  function horaMarca(x, fecha) {
+    if (!x) return "";
+    return String(x.hora || "").slice(0, 5) + (x.fecha !== fecha ? " (" + fechaCorta(x.fecha) + ")" : "");
+  }
+
+  function conductoresVisibles() {
+    var c = state.con;
+    return (c.personas || []).filter(function (p) {
+      return (!c.base || p.base === c.base) && (!c.estado || p.estado === c.estado);
+    });
+  }
+
+  function pintarConductores() {
+    var c = state.con;
+    var cuerpo = $("conCuerpo");
+    $("conSub").textContent = fechaLarga(c.fecha) + " (" + textoCorte() + "). Los conductores que marcaron entrada en el " +
+      "biométrico y sus viajes: cada viaje es del último conductor del bus que marcó entrada antes de que saliera.";
+    $("conExcel").disabled = !c.personas || !c.personas.length;
+    $("conEstado").value = c.estado;
+    if (c.sinFuncion) {
+      cuerpo.innerHTML = '<p class="caja-error">Falta correr tarjeta_viajes_conductor.sql (la versión 15 del SQL de la tarjeta) en Supabase.</p>';
+      return;
+    }
+    if (!c.personas) {
+      cuerpo.innerHTML = c.error ? cajaError("No se pudo traer los conductores: " + textoError(c.error), "recargar-conductores")
+        : '<p class="cargando">Trayendo los conductores…</p>';
+      return;
+    }
+    var sel = $("conBase"), bases = {};
+    c.personas.forEach(function (p) { bases[p.base] = (bases[p.base] || 0) + 1; });
+    sel.innerHTML = '<option value="">Todas las bases</option>' + Object.keys(bases).sort(compararBases).map(function (b) {
+      return '<option value="' + esc(b) + '">' + esc(b + " · " + bases[b] + (bases[b] === 1 ? " conductor" : " conductores")) + "</option>";
+    }).join("");
+    sel.value = bases[c.base] ? c.base : "";
+    c.base = sel.value;
+
+    var deBase = c.personas.filter(function (p) { return !c.base || p.base === c.base; });
+    var cuenta = {};
+    deBase.forEach(function (p) { cuenta[p.estado] = (cuenta[p.estado] || 0) + 1; });
+    var trabajaron = deBase.filter(function (p) { return p.entrada; }).length;
+    var sinEntrada = deBase.filter(function (p) { return !p.entrada; }).length;
+    function caja(titulo, grande, chico, tono) {
+      return '<div class="total"' + (tono ? ' data-tono="' + tono + '"' : "") + "><span>" + titulo + "</span><strong>" + grande + "</strong>" +
+        (chico ? "<small>" + chico + "</small>" : "") + "</div>";
+    }
+    var html = '<div class="totales">' +
+      caja("Trabajaron", trabajaron, "marcaron entrada en el biométrico") +
+      caja("No llenaron", cuenta.nada || 0, "ningún viaje que ya llegó", cuenta.nada ? "mal" : "") +
+      caja("A medias", cuenta.medias || 0, "les falta algo", cuenta.medias ? "revisa" : "") +
+      caja("Llenaron todo", cuenta.lleno || 0, "todos los viajes que ya llegaron", "bien") +
+      "</div>";
+    var notas = [];
+    if (cuenta.camino) notas.push(cuenta.camino + (cuenta.camino === 1 ? " va" : " van") + " en su primer viaje (todavía no cuenta).");
+    if (cuenta.sin) notas.push(cuenta.sin + " marcaron entrada y no tienen viajes: no están programados en un bus ese día, o su bus no salió.");
+    if (sinEntrada) notas.push(sinEntrada + " manejaron sin marcar entrada: sus viajes salen por el turno programado.");
+    if (c.sinDueno) notas.push(c.sinDueno + (c.sinDueno === 1 ? " viaje no tiene conductor" : " viajes no tienen conductor") +
+      ": su bus no estaba programado a esa hora.");
+    if (notas.length) html += '<p class="nota">' + esc(notas.join(" ")) + "</p>";
+
+    var lista = conductoresVisibles();
+    if (!c.personas.length) {
+      html += '<p class="vacio">Nadie marcó entrada ni tiene viajes este día.</p>';
+    } else if (!lista.length) {
+      html += '<p class="vacio">Ningún conductor con ese filtro.</p>';
+    } else {
+      html += '<div class="tabla-caja"><table><thead><tr><th>Estado</th><th>Conductor</th><th>Bus</th><th>Base</th>' +
+        "<th>Biométrico</th><th>Viajes llenos</th><th>Le falta</th></tr></thead><tbody>" +
+        lista.map(function (p) {
+          var e = ESTADOS_CON[p.estado];
+          var enlace = p.bus ? ' class="fila-link" tabindex="0" data-bus="' + esc(p.bus) + '" data-fecha="' + esc(c.fecha) + '"' : "";
+          var origen = p.entrada ? ORIGEN_MARCA[p.entrada.origen] || p.entrada.origen || "" : "";
+          return "<tr" + enlace + ">" +
+            "<td>" + chip(e.tono, e.texto) + "</td>" +
+            "<td><strong>" + esc(capitalizar(p.nombre || "Sin nombre")) + "</strong>" +
+              (state.revisor ? '<span class="menor">' + esc(p.dni) + "</span>" : "") + "</td>" +
+            "<td><strong>" + esc(p.bus || "—") + "</strong>" +
+              '<span class="menor">' + (p.turno != null ? "Turno " + esc(p.turno) : "") + (p.prog ? " · " + esc(p.prog) : "") + "</span></td>" +
+            "<td>" + esc(p.base) + "</td>" +
+            '<td class="num">' + (p.entrada
+              ? "Entró " + esc(horaMarca(p.entrada, c.fecha)) + '<span class="menor">' + (origen ? esc(origen) : "") +
+                (p.salida ? (origen ? " · " : "") + "salió " + esc(horaMarca(p.salida, c.fecha)) : (origen ? " · " : "") + "sin salida") + "</span>"
+              : chip("revisa", "sin entrada")) + "</td>" +
+            '<td class="num"><strong>' + (p.viajes.length ? p.llenos + " de " + p.llegaron : "—") + "</strong>" +
+              (p.enCamino ? '<span class="menor">+' + p.enCamino + " en camino</span>" : "") + "</td>" +
+            "<td>" + (textoFaltanCon(p) ? esc(textoFaltanCon(p)) : "—") + "</td>" +
+          "</tr>";
+        }).join("") + "</tbody></table></div>";
+    }
+    cuerpo.innerHTML = html;
+  }
+
+  function excelConductores() {
+    var c = state.con;
+    if (!c.personas || !c.personas.length) return;
+    var lista = conductoresVisibles();
+    var personas = lista.map(function (p) {
+      var x = { "Día": c.fecha, "Base": p.base, "Bus": p.bus, "Turno": p.turno, "Programado": p.prog,
+        "Conductor": capitalizar(p.nombre) };
+      if (state.revisor) x["Cédula"] = p.dni;
+      x["Entrada"] = horaMarca(p.entrada, c.fecha);
+      x["Marcó en"] = p.entrada ? ORIGEN_MARCA[p.entrada.origen] || p.entrada.origen || "" : "";
+      x["Salida"] = horaMarca(p.salida, c.fecha);
+      x["Viajes"] = p.viajes.length;
+      x["Ya llegaron"] = p.llegaron;
+      x["Llenos"] = p.llenos;
+      x["Falta cívica"] = p.faltan["cívica"];
+      x["Falta pasajeros"] = p.faltan.pasajeros;
+      x["Falta tiquetes"] = p.faltan.tiquetes;
+      x["Estado"] = ESTADOS_CON[p.estado].texto;
+      return x;
+    });
+    var viajes = [];
+    lista.forEach(function (p) {
+      p.viajes.forEach(function (f) {
+        var falta = faltaEnViaje(f);
+        viajes.push({ "Bus": p.bus || f.interno, "Viaje": f.sin_despacho ? "sin despacho" : f.viaje, "Salió": hora(f.hora_salida),
+          "Conductor": capitalizar(p.nombre), "Turno": p.turno, "Según": f.segun === "marca" ? "biométrico" : "programación",
+          "Cívica": f.civica_lectura, "Pasajeros": f.pasajeros_conductor, "Tiquetes": f.tiquetes_escaneados,
+          "Estado": f.estado_calculo === "en_curso" ? "en camino" : falta.length ? "falta " + listaY(falta) : "lleno" });
+      });
+    });
+    var libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hojaDe(personas, { Conductor: 34 }), "Por conductor");
+    XLSX.utils.book_append_sheet(libro, hojaDe(viajes.length ? viajes : [{ "Viajes": "Ninguno" }], { Conductor: 34 }), "Viajes");
+    XLSX.writeFile(libro, "por_conductor_" + c.fecha + ".xlsx");
   }
 
   // ================================================================ novedades del conductor (sql v11)
@@ -4746,6 +5042,20 @@
     $("gesHoy").addEventListener("click", function () { location.hash = "#/gestores/" + diaDeHoy(); });
     $("gesActualizar").addEventListener("click", function () { cargarGestores(); });
 
+    // Por conductor (sql v15)
+    alCambiarFechas(["conFecha"], function () { location.hash = "#/conductores/" + $("conFecha").value; });
+    $("conAntes").addEventListener("click", function () { location.hash = "#/conductores/" + sumarDias(state.con.fecha, -1); });
+    $("conDespues").addEventListener("click", function () { location.hash = "#/conductores/" + sumarDias(state.con.fecha, 1); });
+    $("conHoy").addEventListener("click", function () { location.hash = "#/conductores/" + diaDeHoy(); });
+    $("conActualizar").addEventListener("click", function () { cargarConductores(); });
+    $("conBase").addEventListener("change", function () {
+      state.con.base = state.dia.base = state.inf.base = this.value;
+      guardarBase(this.value);
+      pintarConductores();
+    });
+    $("conEstado").addEventListener("change", function () { state.con.estado = this.value; pintarConductores(); });
+    $("conExcel").addEventListener("click", excelConductores);
+
     // Novedades del conductor
     $("novForm").addEventListener("submit", function (ev) {
       ev.preventDefault();
@@ -4802,6 +5112,7 @@
         else if (accion === "recargar-bus") { state.bus.error = null; pintarBus(); cargarBus(); }
         else if (accion === "recargar-informe") consultarInforme();
         else if (accion === "recargar-gestores") cargarGestores();
+        else if (accion === "recargar-conductores") cargarConductores();
         else if (accion === "recargar-movilidad") cargarMovilidad();
         else if (accion === "recargar-novedades") cargarNovedades();
         return;
@@ -4867,6 +5178,8 @@
     // El día de hoy se vuelve a pedir solo cada 2 minutos mientras se ve (en el Día o en Por base).
     setInterval(function () {
       if (state.user && (state.vista === "dia" || state.vista === "bases") && !document.hidden && state.dia.fecha === diaDeHoy() && !state.dia.cargando) cargarDia(true);
+      if (state.user && state.vista === "conductores" && !document.hidden && state.con.fecha === diaDeHoy() && !state.con.cargando &&
+          state.con.personas) cargarConductores(true);
     }, cfg.REFRESCO_MS);
 
     client.auth.getSession().then(function (r) {

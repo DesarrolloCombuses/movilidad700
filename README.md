@@ -251,6 +251,25 @@ Desde el 22-oct-2026 (pedido del usuario) donde decía *sensor tapado* dice **bl
 *Puerta por puerta*, la nota de abajo, el mapa del recorrido, el Excel de la tarjeta del bus (columna *Bloqueos*) y
 la columna *Bloqueos* del Excel viaje a viaje. Solo cambia la palabra: el dato es el mismo (`tapado`).
 
+### Por conductor (v0.18.0)
+
+Pedido del usuario el 22-oct-2026: *"necesito saber quién llenó la tarjeta y quién no, de acuerdo al biométrico, los
+que trabajaron"*. Pestaña **Por conductor** (`#/conductores/fecha`):
+
+- **Quiénes:** los conductores con **entrada** en el biométrico ese día (de 2:30 a 2:30), más los que manejaron sin
+  marcar (sus viajes salen por el turno programado). Gestores y oficina no salen.
+- **Sus viajes:** los de `tarjeta_viajes_conductor` (SQL v15), la misma regla de la liquidación del portal del
+  conductor v1.22.0: el último conductor del bus que marcó entrada antes de que saliera; si nadie había marcado, el del
+  turno programado.
+- **Estado:** *No llenó* (nada escrito en los viajes que ya llegaron), *A medias*, *Llenó todo*, *En camino* (su primer
+  viaje no ha llegado) o *Sin viajes*. Arriba: Trabajaron, No llenaron, A medias y Llenaron todo.
+- **Columnas:** conductor (la cédula solo para despachadores), bus y turno programado, base, entrada y salida del
+  biométrico (celular u oficina), *Viajes llenos* (X de los que ya llegaron, más los que van en camino) y *Le falta*
+  (en cuántos viajes falta la cívica, los pasajeros y los tiquetes). Tocar una fila abre la tarjeta del bus.
+- Filtros por base y por estado. **Excel** con dos hojas: *Por conductor* y *Viajes* (cada viaje con su conductor y si
+  salió por el biométrico o por la programación).
+- Sin la función en la base dice *"Falta correr tarjeta_viajes_conductor.sql"*.
+
 ### El día de la tarjeta
 
 Es el día de la empresa: **de 2:30 a. m. a 2:30 a. m. del día siguiente**. Un viaje va al día de la hora de su

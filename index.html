@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./css/control.css?v=0.17.1">
+  <link rel="stylesheet" href="./css/control.css?v=0.18.0">
 </head>
 <body>
 
@@ -51,6 +51,7 @@
     <nav class="pestanas" aria-label="Secciones">
       <a href="#/dia" data-pestana="dia">Día</a>
       <a href="#/bases" data-pestana="bases">Por base</a>
+      <a href="#/conductores" data-pestana="conductores">Por conductor</a>
       <a href="#/bus" data-pestana="bus">Tarjeta del bus</a>
       <a href="#/informes" data-pestana="informes">Informes</a>
       <a href="#/movilidad" data-pestana="movilidad">Movilidad</a>
@@ -124,6 +125,34 @@
       <div id="diaBases" class="bases"></div>
       <p id="basesPie" class="pie"></p>
       <div id="basesConductores"></div>
+    </section>
+
+    <!-- ---- Por conductor: de los que trabajaron según el biométrico, quién llenó la tarjeta y quién no (sql v15) ---- -->
+    <section id="vistaConductores" class="vista" hidden>
+      <div class="cabeza">
+        <div>
+          <h1>Por conductor</h1>
+          <p id="conSub" class="sub"></p>
+        </div>
+        <div class="controles">
+          <select id="conBase" aria-label="Base"><option value="">Todas las bases</option></select>
+          <select id="conEstado" aria-label="Estado">
+            <option value="">Todos</option>
+            <option value="nada">No llenó</option>
+            <option value="medias">A medias</option>
+            <option value="lleno">Llenó todo</option>
+            <option value="camino">En camino</option>
+            <option value="sin">Sin viajes</option>
+          </select>
+          <button id="conAntes" class="btn btn-sutil btn-cuadro" type="button" title="Día anterior" aria-label="Día anterior">‹</button>
+          <input id="conFecha" type="date" aria-label="Día">
+          <button id="conDespues" class="btn btn-sutil btn-cuadro" type="button" title="Día siguiente" aria-label="Día siguiente">›</button>
+          <button id="conHoy" class="btn btn-sutil" type="button">Hoy</button>
+          <button id="conActualizar" class="btn" type="button">Actualizar</button>
+          <button id="conExcel" class="btn btn-sutil" type="button" disabled>Excel</button>
+        </div>
+      </div>
+      <div id="conCuerpo"></div>
     </section>
 
     <!-- ---- La tarjeta de un bus ---- -->
@@ -352,7 +381,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="./js/control-config.js?v=0.17.1"></script>
-<script src="./js/control.js?v=0.17.1"></script>
+<script src="./js/control-config.js?v=0.18.0"></script>
+<script src="./js/control.js?v=0.18.0"></script>
 </body>
 </html>
