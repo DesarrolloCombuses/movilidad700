@@ -405,6 +405,16 @@
       state.v10 = !v10.error;
       if (state.v10 && CAMPOS_VIAJE.indexOf(",personal") < 0) CAMPOS_VIAJE += ",personal,personal_detalle";
     } catch (_) { state.v10 = false; }
+    // ¿Y la v17? El conductor registra al personal que no tiene internet: llega de dónde salió cada registro y un
+    // despachador lo puede anular.
+    try {
+      var v17 = state.v10 ? await conTiempo(client.from("v_personal_viajes").select("origen").limit(1), 15000) : { error: true };
+      state.v17 = !v17.error;
+      if (state.v17 && CAMPOS_PERSONAL.indexOf(",origen") < 0) {
+        CAMPOS_PERSONAL += ",origen";
+        CAMPOS_PERSONAL_HOJA += ",origen";
+      }
+    } catch (_) { state.v17 = false; }
     var rol = $("quienRol");
     rol.textContent = state.revisor ? "Puede corregir" : "Solo lectura";
     rol.setAttribute("data-tono", state.revisor ? "ok" : "revisa");
@@ -1855,7 +1865,8 @@
     var foto = (state.bus.fotosPersonal || {})[p.id_local];
     return '<li class="personal-item">' + selfieDe(foto, p.nombre) + "<span><strong>" + esc(capitalizar(p.nombre)) + "</strong>" +
       (p.cargo ? " · " + esc(capitalizar(p.cargo)) : "") + " · " + hora(p.leido_en) +
-      (foto && foto.lat != null ? " · " + lugarDe(foto) : "") + "</span></li>";
+      (foto && foto.lat != null ? " · " + lugarDe(foto) : "") +
+      (delConductor(p) ? " " + chipOrigen(p) : "") + botonAnularPersonal(p) + "</span></li>";
   }
 
   // Los turnos programados del bus ese día, cada uno con su inicio de labores.
@@ -2027,7 +2038,8 @@
     if (delPersonal.length) {
       der += '<div class="registro"><div class="registro-cabeza"><b>Personal de la empresa</b></div><ul class="gestores-lista">' +
         delPersonal.map(liPersonal).join("") + "</ul>" +
-        '<p class="nota">Leyó el código del bus en el celular del conductor. Va en los pasajeros del viaje, pero su pasaje no se cobra.</p></div>';
+        '<p class="nota">Leyó el código del bus en el celular del conductor' + (state.v17 ? ", o el conductor lo registró con una foto (si no tenía internet)" : "") +
+        ". Va en los pasajeros del viaje, pero su pasaje no se cobra.</p></div>";
     }
 
     // Gestores que se subieron en este viaje (v8): el sensor los contó; la tarjeta resta los que cuadran
@@ -2453,6 +2465,81 @@
   var CAMPOS_PERSONAL = "id_local,dia,interno,viaje,clave,despacho_en,nombre,cargo,leido_en,recibido_en";
   var CAMPOS_PERSONAL_HOJA = "id_local,dni,dni_conductor,selfie,lat,lon,precision_m,dispositivo";
 
+  // v17 (22-oct-2026): si la persona no tiene internet, el CONDUCTOR la registra desde su portal (leyendo el código
+  // de la app de ella, o escribiendo la cédula) y le toma una foto. Cuenta igual (suma, no se cobra), pero aquí sale
+  // "Lo registró el conductor" con esa foto, y un despachador lo puede anular: deja de contar en la tarjeta y la
+  // movilidad (personal_anular_subida). Lo anulado ya no sale en v_personal_viajes; los despachadores lo ven aparte.
+  function delConductor(p) { return !!p && /^conductor_/.test(p.origen || ""); }
+
+  function chipOrigen(p) {
+    return chip("revisa", "Lo registró el conductor") +
+      '<span class="menor">' + (p.origen === "conductor_qr" ? "leyó el código de la app de la persona" : "escribió la cédula a mano") + "</span>";
+  }
+
+  function botonAnularPersonal(p) {
+    return state.revisor && state.v17
+      ? ' <button class="btn btn-chico" type="button" data-per-anular="' + esc(p.id_local) + '">Anular</button>' : "";
+  }
+
+  function registroPersonalDe(id) {
+    var todos = (state.ges.registros || []).concat(state.bus.personal || []);
+    for (var i = 0; i < todos.length; i++) if (todos[i].id_local === id) return todos[i];
+    return null;
+  }
+
+  function abrirAnularPersonal(id) {
+    var p = registroPersonalDe(id);
+    if (!p) return;
+    abrirHoja("Anular el registro del personal",
+      "<p><strong>" + esc(capitalizar(p.nombre || "Sin nombre")) + "</strong>" + (p.cargo ? " · " + esc(capitalizar(p.cargo)) : "") +
+        " en el " + esc(p.interno) + " · " + esc(momento(p.leido_en)) + "</p>" +
+      (delConductor(p) ? '<p class="nota">Lo registró el conductor (' + (p.origen === "conductor_qr" ? "con el código de la app de la persona" : "escribió la cédula") +
+        "). Mire la foto antes de anular.</p>" : "") +
+      '<p class="nota">No se borra: queda anulado, con quién, cuándo y por qué. Deja de contar como personal de la empresa en la tarjeta y la ' +
+        "movilidad del " + esc(p.interno) + " (ese pasajero vuelve a cobrarse).</p>" +
+      '<form id="formAnularPersonal" novalidate><label class="campo"><span>Por qué</span><textarea id="anularPerMotivo" maxlength="300"></textarea></label>' +
+      '<p id="anularPerError" class="error" hidden></p>' +
+      '<div class="acciones"><button class="btn btn-peligro" type="submit" id="anularPerGuardar">Anular</button>' +
+      '<button class="btn" type="button" data-cerrar-hoja>Cancelar</button></div></form>',
+      function (caja) {
+        caja.querySelector("#formAnularPersonal").addEventListener("submit", async function (ev) {
+          ev.preventDefault();
+          var motivo = $("anularPerMotivo").value.trim();
+          if (motivo.length < 3) {
+            $("anularPerError").textContent = "Escriba por qué.";
+            $("anularPerError").hidden = false;
+            return;
+          }
+          $("anularPerGuardar").disabled = true;
+          try {
+            var res = await conTiempo(client.rpc("personal_anular_subida", { p_id_local: p.id_local, p_motivo: motivo }));
+            if (res.error) throw res.error;
+            cerrarHoja();
+            aviso("Registro de " + capitalizar(p.nombre || "la persona") + " anulado.");
+            state.mov.filas = null;              // la movilidad se vuelve a traer al abrirla
+            if (state.vista === "bus") cargarBus(); else cargarGestores();
+          } catch (err) {
+            $("anularPerError").textContent = textoError(err);
+            $("anularPerError").hidden = false;
+            $("anularPerGuardar").disabled = false;
+          }
+        });
+      });
+  }
+
+  // Lo anulado de un día (solo los despachadores: sale de la hoja personal_subidas).
+  async function anuladosDelPersonal(fecha) {
+    if (!state.revisor || !state.v17) return [];
+    var corte = horaCorte();
+    var res = await conTiempo(client.from("personal_subidas")
+      .select("id_local,nombre,cargo,interno,leido_en,origen,anulada_en,anulada_por,anulada_motivo")
+      .not("anulada_en", "is", null)
+      .gte("leido_en", fecha + "T" + corte + ":00-05:00").lt("leido_en", sumarDias(fecha, 1) + "T" + corte + ":00-05:00")
+      .order("leido_en"));
+    if (res.error) throw res.error;
+    return res.data || [];
+  }
+
   // La selfie y el lugar de unos registros (solo los despachadores; a los demás no les llega nada).
   async function fotosDelPersonal(ids) {
     var fotos = {};
@@ -2482,8 +2569,12 @@
   function verSelfie(id) {
     var foto = (state.ges.fotos || {})[id] || (state.bus.fotosPersonal || {})[id];
     if (!foto) return;
-    abrirHoja("Selfie al registrarse", '<img class="selfie-foto" src="' + esc(foto.selfie) + '" alt="Selfie">' +
-      '<p class="nota">Cédula ' + esc(foto.dni) + (foto.dni_conductor ? " · el código lo mostró el conductor de cédula " + esc(foto.dni_conductor) : "") +
+    var porConductor = delConductor(foto);
+    abrirHoja(porConductor ? "Foto que tomó el conductor" : "Selfie al registrarse", '<img class="selfie-foto" src="' + esc(foto.selfie) + '" alt="Foto">' +
+      '<p class="nota">Cédula ' + esc(foto.dni) + (foto.dni_conductor
+        ? (porConductor ? " · la registró el conductor de cédula " : " · el código lo mostró el conductor de cédula ") + esc(foto.dni_conductor)
+        : "") +
+      (porConductor ? (foto.origen === "conductor_qr" ? " (leyó el código de la app de la persona)" : " (escribió la cédula a mano)") : "") +
       "</p>");
   }
 
@@ -2513,9 +2604,11 @@
       if (res.error) throw res.error;
       var fotos = await fotosDelPersonal((res.data || []).map(function (x) { return x.id_local; }))
         .catch(function () { return {}; });
+      var anulados = await anuladosDelPersonal(fecha).catch(function () { return null; });
       if (g.fecha !== fecha) return;
       g.registros = res.data || [];
       g.fotos = fotos;
+      g.anulados = anulados;
       g.error = null;
     } catch (err) {
       if (g.fecha === fecha) g.error = err;
@@ -2530,7 +2623,8 @@
     var g = state.ges;
     var cuerpo = $("gesCuerpo");
     $("gesSub").textContent = fechaLarga(g.fecha) + " (" + textoCorte() + "). La persona se registra al subir, leyendo el " +
-      "código del bus en el celular del conductor: suma en los pasajeros del viaje, pero su pasaje no se cobra.";
+      "código del bus en el celular del conductor" + (state.v17 ? " (si no tiene internet, la registra el conductor con una foto)" : "") +
+      ": suma en los pasajeros del viaje, pero su pasaje no se cobra.";
     if (!state.v10) {
       cuerpo.innerHTML = '<p class="caja-error">Falta correr personal_empresa.sql (la versión 10 del SQL de la tarjeta) en Supabase.</p>';
       return;
@@ -2543,24 +2637,28 @@
     var personas = {}, buses = {};
     g.registros.forEach(function (r) { personas[r.nombre + "|" + r.cargo] = true; buses[r.interno] = true; });
     var sinViaje = g.registros.filter(function (r) { return !r.clave; }).length;
+    var porConductor = g.registros.filter(delConductor).length;
     function caja(titulo, grande, chico, tono) {
       return '<div class="total"' + (tono ? ' data-tono="' + tono + '"' : "") + "><span>" + titulo + "</span><strong>" + grande + "</strong>" +
         (chico ? "<small>" + chico + "</small>" : "") + "</div>";
     }
     var html = '<div class="totales">' +
-      caja("Registros", g.registros.length, "leyeron el código del bus") +
+      caja("Registros", g.registros.length, state.v17 ? "se registraron al subir" : "leyeron el código del bus") +
       caja("Personas", Object.keys(personas).length, "distintas") +
       caja("Buses", Object.keys(buses).length, "con alguien de la empresa") +
       caja("Sin viaje", sinViaje, sinViaje ? "no se encontró el viaje: revíselos" : "todos van en un viaje", sinViaje ? "revisa" : "") +
+      (state.v17 ? caja("Por el conductor", porConductor, porConductor ? "la persona no tenía internet: mire la foto" : "todos leyeron el código del bus",
+        porConductor ? "revisa" : "") : "") +
       "</div>";
     if (!state.revisor) {
-      html += '<p class="nota">La selfie, la cédula y el lugar solo los ven los despachadores (tarjeta_revisores).</p>';
+      html += '<p class="nota">La foto, la cédula y el lugar solo los ven los despachadores (tarjeta_revisores). Ellos también pueden anular un registro.</p>';
     }
     if (!g.registros.length) {
       html += '<p class="vacio">Nadie de la empresa se registró en los buses este día.</p>';
     } else {
       html += '<div class="tabla-caja"><table><thead><tr><th>Hora</th><th>Bus</th><th>Viaje</th><th>Persona</th>' +
-        (state.revisor ? "<th>Selfie</th><th>Dónde</th>" : "") + "</tr></thead><tbody>" +
+        (state.v17 ? "<th>Cómo</th>" : "") + (state.revisor ? "<th>Foto</th><th>Dónde</th>" : "") +
+        (state.revisor && state.v17 ? "<th></th>" : "") + "</tr></thead><tbody>" +
         g.registros.map(function (r) {
           var foto = (g.fotos || {})[r.id_local];
           return '<tr class="fila-link" tabindex="0" data-bus="' + esc(r.interno) + '" data-fecha="' + esc(r.dia) + '">' +
@@ -2568,7 +2666,21 @@
             "<td>" + (r.clave ? "Viaje " + esc(r.viaje) + '<span class="menor">salió ' + hora(r.despacho_en) + "</span>"
               : chip("revisa", "sin viaje") + '<span class="menor">ese bus no tenía un viaje a esa hora</span>') + "</td>" +
             "<td><strong>" + esc(capitalizar(r.nombre || "Sin nombre")) + '</strong><span class="menor">' + esc(capitalizar(r.cargo || "")) + "</span></td>" +
-            (state.revisor ? "<td>" + (selfieDe(foto, r.nombre) || "—") + "</td><td>" + lugarDe(foto) + "</td>" : "") + "</tr>";
+            (state.v17 ? "<td>" + (delConductor(r) ? chipOrigen(r) : '<span class="menor">Leyó el código del bus</span>') + "</td>" : "") +
+            (state.revisor ? "<td>" + (selfieDe(foto, r.nombre) || "—") + "</td><td>" + lugarDe(foto) + "</td>" : "") +
+            (state.revisor && state.v17 ? "<td>" + botonAnularPersonal(r) + "</td>" : "") + "</tr>";
+        }).join("") + "</tbody></table></div>";
+    }
+    if (g.anulados && g.anulados.length) {
+      html += '<h3 class="sub-hoja">Anulados este día (' + g.anulados.length + ")</h3>" +
+        '<p class="nota">No cuentan en la tarjeta ni en la movilidad.</p>' +
+        '<div class="tabla-caja"><table><thead><tr><th>Hora</th><th>Bus</th><th>Persona</th><th>Cómo</th><th>Lo anuló</th><th>Por qué</th></tr></thead><tbody>' +
+        g.anulados.map(function (r) {
+          return "<tr><td class=\"num\">" + hora(r.leido_en) + "</td><td><strong>" + esc(r.interno) + "</strong></td>" +
+            "<td><strong>" + esc(capitalizar(r.nombre || "Sin nombre")) + '</strong><span class="menor">' + esc(capitalizar(r.cargo || "")) + "</span></td>" +
+            "<td>" + (delConductor(r) ? chipOrigen(r) : '<span class="menor">Leyó el código del bus</span>') + "</td>" +
+            "<td>" + esc(r.anulada_por || "—") + '<span class="menor">' + esc(momento(r.anulada_en)) + "</span></td>" +
+            "<td>" + esc(r.anulada_motivo || "") + "</td></tr>";
         }).join("") + "</tbody></table></div>";
     }
     cuerpo.innerHTML = html;
@@ -5568,6 +5680,7 @@
       if ((el = t.closest("[data-selfie]"))) return verSelfie(el.getAttribute("data-selfie"));
       if ((el = t.closest("[data-nov-video]"))) return verVideoNovedad(el.getAttribute("data-nov-video"));
       if ((el = t.closest("[data-nov-anular]"))) return abrirAnularNovedad(el.getAttribute("data-nov-anular"));
+      if ((el = t.closest("[data-per-anular]"))) return abrirAnularPersonal(el.getAttribute("data-per-anular"));
       if (t.closest("a, input, textarea, select, form")) return;
       if ((el = t.closest("tr[data-mov-dia]"))) {
         var dia = el.getAttribute("data-mov-dia");

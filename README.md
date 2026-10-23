@@ -270,6 +270,20 @@ que trabajaron"*. Pestaña **Por conductor** (`#/conductores/fecha`):
   salió por el biométrico o por la programación).
 - Sin la función en la base dice *"Falta correr tarjeta_viajes_conductor.sql"*.
 
+### El personal que registra el conductor (v0.21.0, SQL v17)
+
+Pedido del usuario el 22-oct-2026: si la persona de la empresa no tiene internet, el **conductor** la registra desde su
+portal (leyendo el código de la app de ella o escribiendo la cédula) y le toma una **foto**. Cuenta igual: suma en los
+pasajeros y no se cobra. Lo corre `personal_por_conductor.sql` (SQL v17; para quitarlo, `quitar_personal_por_conductor.sql`).
+
+- **Pestaña Personal:** columna **Cómo** (*Leyó el código del bus* o *Lo registró el conductor*: con el código de la app
+  de la persona o escribió la cédula), cuadro **Por el conductor**, y la foto que tomó el conductor (*"Foto que tomó el
+  conductor"*, solo despachadores).
+- **Anular** (solo despachadores, con el motivo; `personal_anular_subida`): no se borra, queda anulado con quién y
+  cuándo, y deja de contar en la tarjeta y en la movilidad (ese pasajero vuelve a cobrarse). Abajo sale *"Anulados este
+  día"*. También en la tarjeta del bus, en el viaje.
+- `v_personal_viajes` ya no trae lo anulado y trae el `origen` al final. Sin la v17 la pestaña sale como antes.
+
 ### El alistamiento de cada bus (v0.20.0, SQL v16)
 
 Pedido del usuario el 22-oct-2026: integrar la app de alistamiento, la revisión diaria del bus que va a la
