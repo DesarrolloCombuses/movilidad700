@@ -108,6 +108,11 @@ textarea { min-height: 70px; resize: vertical; width: 100%; }
 .pestanas a[aria-current="page"] { background: var(--soft); color: var(--primary-strong); }
 .quien { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--muted); }
 .quien-correo { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Nueve pestañas (v0.20.0, con Alistamiento) no caben al lado de la marca y la cuenta: van en su propio renglón. */
+@media (max-width: 1600px) {
+  .pestanas { order: 3; flex-basis: 100%; }
+  .quien { margin-left: auto; }
+}
 
 /* ---------------------------------------------------------------- vistas */
 .contenido { max-width: 1440px; margin: 0 auto; padding: 18px 20px 48px; }
@@ -483,3 +488,22 @@ td.mov-ajustes .btn-chico { min-height: 26px; padding: 0 8px; }
 .sub-hoja { margin: 14px 0 4px; font-size: 15px; }
 .nov-obs { color: #8a5a00; font-weight: 600; }
 .nov-obs.nov-anulada { color: var(--muted); text-decoration: line-through; font-weight: 500; }
+
+/* Alistamiento (v0.20.0, sql v16): la revisión diaria de cada bus (la app del SICOV) */
+td.alist-celda { min-width: 150px; }
+.alist-bloque { margin: 0 0 14px; padding: 12px 14px; }
+.alist-bloque[data-tono="mal"] { border-color: var(--danger); background: var(--danger-soft); }
+.alist-bloque[data-tono="revisa"] { border-color: #e7c66d; background: var(--warn-soft); }
+.alist-bloque p { margin: 6px 0 0; }
+.alist-fallas { margin: 8px 0 0; padding-left: 20px; color: var(--danger); }
+.alist-fallas li { margin: 3px 0; }
+.alist-puntos { margin-top: 10px; }
+.alist-puntos > summary { cursor: pointer; font-weight: 700; color: var(--primary-strong); }
+.alist-puntos h4 { margin: 10px 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.alist-lista { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 2px 18px; }
+.alist-lista li { display: flex; gap: 8px; align-items: baseline; font-size: 13.5px; }
+.alist-lista li > span[aria-hidden] { flex: none; width: 16px; font-weight: 800; color: var(--primary); }
+.alist-lista li[data-conforme="false"] { color: var(--danger); font-weight: 650; }
+.alist-lista li[data-conforme="false"] > span[aria-hidden] { color: var(--danger); }
+.alist-lista li .menor { display: inline; margin-left: 4px; }
+#alistCuerpo td.obs { white-space: normal; min-width: 220px; max-width: 420px; }

@@ -270,6 +270,27 @@ que trabajaron"*. Pestaña **Por conductor** (`#/conductores/fecha`):
   salió por el biométrico o por la programación).
 - Sin la función en la base dice *"Falta correr tarjeta_viajes_conductor.sql"*.
 
+### El alistamiento de cada bus (v0.20.0, SQL v16)
+
+Pedido del usuario el 22-oct-2026: integrar la app de alistamiento, la revisión diaria del bus que va a la
+Supertransporte por GESMOVIL (*"va atada a todo"*). Es una por placa y por día. El bus sale de la flota por la placa
+(la misma lista que ve el conductor: *"KTO059 — interno 708"*).
+
+- **Lo lee** `control_alistamientos(desde, hasta)` y `control_alistamiento_detalle(id)`
+  (`almacentro/enturnes/sql/control_alistamientos.sql`): solo leen; las tablas del SICOV no se tocan. Sin ese SQL,
+  todo sale como antes y la pestaña dice que falta correrlo.
+- **Día:** columna *Alistamiento* (Hecho, Con novedad, **Salió sin alistamiento** en rojo, Falta o No salió), el
+  cuadro *"Alistamiento 43 de 51 · 8 salieron sin alistamiento"* y el filtro *Sin alistamiento*.
+- **Salió sin alistamiento** = el primer despacho del bus fue antes de tenerlo (o no lo tiene). Ej. 22-oct: el 723
+  alistó a las 2:33 y salió a las 2:56 (bien).
+- **Pestaña Alistamiento** (`#/alistamiento/fecha`): todos los buses del día, con la hora, el primer despacho, quién lo
+  registró, los puntos con falla y las observaciones. Filtros por base y estado. **Excel** con dos hojas: *Alistamiento* y
+  *Fallas*.
+- **Tarjeta del bus:** el bloque *Alistamiento del día* con lo de arriba y los 40 puntos (los de falla en rojo).
+- **Datos sensibles:** lo que declara el conductor de descanso y de alcohol/sustancias, y su cédula, solo lo ven los
+  despachadores (`tarjeta_revisores`). Los demás ven *Con novedad* sin el motivo.
+- Con nueve pestañas, por debajo de 1600 px van en su propio renglón.
+
 ### Los días que faltan por cargar el Metro (v0.19.0)
 
 Pedido del usuario el 22-oct-2026: *"mostrar en la movilidad qué días faltan por adicionar la cívica del metro, esto es

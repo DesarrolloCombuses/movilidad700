@@ -92,6 +92,9 @@
     // Por conductor (sql v15): de los que trabajaron según el biométrico, quién llenó la tarjeta y quién no
     con: { fecha: null, personas: null, error: null, cargando: false, base: baseGuardada(), estado: "", sinFuncion: false,
       sinMarcaNiViajes: 0 },
+    // Alistamiento (sql v16): la revisión diaria de cada bus (la app de alistamiento del SICOV)
+    alist: { fecha: null, buses: null, error: null, cargando: false, base: baseGuardada(), estado: "", sinFuncion: false,
+      fallas: {}, sueltos: [], cargadoEn: null },
     // Novedades del conductor (sql v11): trasbordo, varado, accidente u otra, con su video
     nov: { desde: null, hasta: null, lista: null, error: null, cargando: false, hay: true, tipo: "", limpiado: false },
     // Movilidad: la Base de datos de Movilidad 2026 (movilidad.sql: ajustes y archivos planos)
@@ -442,7 +445,7 @@
   function enrutar() {
     if (!state.user) return;
     var partes = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
-    var vista = ["dia", "bases", "conductores", "bus", "informes", "movilidad", "gestores", "novedades"].indexOf(partes[0]) >= 0 ? partes[0] : "dia";
+    var vista = ["dia", "bases", "conductores", "alistamiento", "bus", "informes", "movilidad", "gestores", "novedades"].indexOf(partes[0]) >= 0 ? partes[0] : "dia";
     mostrarVista(vista);
     if (vista === "dia") {
       abrirDia(esFecha(partes[1]) ? partes[1] : state.dia.fecha || diaDeHoy());
@@ -450,6 +453,8 @@
       abrirBases(esFecha(partes[1]) ? partes[1] : state.dia.fecha || diaDeHoy());
     } else if (vista === "conductores") {
       abrirConductores(esFecha(partes[1]) ? partes[1] : state.con.fecha || state.dia.fecha || diaDeHoy());
+    } else if (vista === "alistamiento") {
+      abrirAlistamiento(esFecha(partes[1]) ? partes[1] : state.alist.fecha || state.dia.fecha || diaDeHoy());
     } else if (vista === "bus") {
       abrirBus(partes[1] || state.bus.interno, esFecha(partes[2]) ? partes[2] : state.bus.fecha || state.dia.fecha || diaDeHoy());
     } else if (vista === "gestores") {
@@ -472,6 +477,7 @@
     $("vistaDia").hidden = vista !== "dia";
     $("vistaBases").hidden = vista !== "bases";
     $("vistaConductores").hidden = vista !== "conductores";
+    $("vistaAlistamiento").hidden = vista !== "alistamiento";
     $("vistaBus").hidden = vista !== "bus";
     $("vistaInformes").hidden = vista !== "informes";
     $("vistaGestores").hidden = vista !== "gestores";
@@ -491,6 +497,7 @@
     if (state.dia.fecha) dia.href = "#/dia/" + state.dia.fecha;
     if (state.dia.fecha) document.querySelector('[data-pestana="bases"]').href = "#/bases/" + state.dia.fecha;
     if (state.con.fecha || state.dia.fecha) document.querySelector('[data-pestana="conductores"]').href = "#/conductores/" + (state.con.fecha || state.dia.fecha);
+    if (state.alist.fecha || state.dia.fecha) document.querySelector('[data-pestana="alistamiento"]').href = "#/alistamiento/" + (state.alist.fecha || state.dia.fecha);
     if (state.bus.interno) bus.href = "#/bus/" + encodeURIComponent(state.bus.interno) + "/" + state.bus.fecha;
     if (state.ges.fecha) document.querySelector('[data-pestana="gestores"]').href = "#/gestores/" + state.ges.fecha;
     if (state.nov.desde) document.querySelector('[data-pestana="novedades"]').href = "#/novedades/" + state.nov.desde + "/" + state.nov.hasta;
@@ -872,6 +879,7 @@
       var asistencia = traerAsistencia(fecha, true).catch(function () { return null; });
       var programacion = traerProgramacion(fecha).catch(function () { return null; });
       var listaPersonal = traerListaPersonal().catch(function () { return null; });
+      var alistamientos = traerAlistamientos(fecha, true).catch(function () { return null; });
       var personal = state.v10 ? traerTodo(function () {
         return client.from("v_personal_viajes").select("id_local,interno,clave").eq("dia", fecha).order("leido_en").order("id_local");
       }).catch(function () { return null; }) : Promise.resolve(null);
@@ -885,7 +893,9 @@
       var marcas = await asistencia;
       var turnos = await programacion;
       var personalLista = await listaPersonal;
+      var alist = await alistamientos;
       if (d.fecha !== fecha) return;
+      d.alist = alist && !alist.sinFuncion ? alist : null;
       d.asistencia = marcas;
       d.programacion = turnos;
       d.listaPersonal = personalLista;
@@ -1253,6 +1263,7 @@
     if (f === "sin_despacho" && !r.sd) return false;
     if (f === "personal" && !r.personalEmpresa) return false;
     if (f === "sin_inicio" && !r.sinInicio) return false;
+    if (f === "sin_alistamiento" && !(r.alist && (r.alist.tipo === "salio" || r.alist.tipo === "falta"))) return false;
     if (f === "aviso" && !tieneAvisos(r.estadoBus)) return false;
     if (d.ruta && r.rutas.indexOf(d.ruta) < 0) return false;
     var q = d.buscar.trim().toLowerCase();
@@ -1294,6 +1305,8 @@
     buses.forEach(function (r) { r.estadoBus = d.estados ? d.estados[r.clave] || null : null; });
     ponerPersonal(buses, d);
     buses.forEach(function (r) { ponerInicio(r, d, paresDeBus(r)); });
+    // El alistamiento de cada bus (sql v16): si salió sin él lo dice en rojo.
+    buses.forEach(function (r) { r.alist = d.alist ? estadoAlist(alistDe(d.alist, r.clave, r.placa), primerDespacho(filas, r.clave), d.fecha) : null; });
     pintarAvisos(d, buses, base);
     pintarSinLlenar(d, filas, base);
     var todo = nuevoResumen("todo");
@@ -1303,7 +1316,7 @@
     totales.innerHTML = totalesHtml(todo,
       '<div class="total"' + (avisan ? ' data-tono="mal"' : "") + "><span>" + (base ? "Buses · " + esc(base) : "Buses") + "</span><strong>" +
         buses.length + "</strong><small>" + (avisan ? (avisan === 1 ? "1 con aviso" : avisan + " con aviso") + " · " : "") +
-        (conProblemas ? conProblemas + " para revisar" : "ninguno para revisar") + "</small></div>" + totalInicio(filas, d));
+        (conProblemas ? conProblemas + " para revisar" : "ninguno para revisar") + "</small></div>" + totalInicio(filas, d) + totalAlist(buses));
 
     // Las rutas del día, para el filtro
     var nombres = {};
@@ -1319,14 +1332,15 @@
     var visibles = ordenar(buses.filter(function (r) { return pasaFiltro(r, d); }), d.orden, true);
     var o = d.orden;
     var html = "<table><thead><tr>" +
-      thOrden("clave", "Bus", o) + thOrden("conductor", "Conductor", o) + thOrden("viajes", "Viajes", o, true) +
+      thOrden("clave", "Bus", o) + thOrden("conductor", "Conductor", o) + (d.alist ? "<th>Alistamiento</th>" : "") +
+      thOrden("viajes", "Viajes", o, true) +
       thOrden("sensor", "Sensor", o, true) + thOrden("plataSensor", "$ Sensor", o, true) +
       thOrden("conductorP", "Conductor dice", o, true) + thOrden("plataConductor", "$ Conductor", o, true) +
       thOrden("difPlata", "Diferencia", o, true) + thOrden("civicas", "Cívicas", o, true) +
       thOrden("tiquetes", "Tiquetes", o, true) + thOrden("estado", "Estado", o) +
       "</tr></thead><tbody>";
     if (!visibles.length) {
-      html += '<tr><td colspan="11" class="vacio">' +
+      html += '<tr><td colspan="' + (d.alist ? 12 : 11) + '" class="vacio">' +
         (buses.length ? "Ningún bus con ese filtro." : "Todavía no hay tarjetas este día. Aparecen cuando el programa del servidor las publica.") +
         "</td></tr>";
     }
@@ -1336,6 +1350,7 @@
         '<td><span class="bus-num">' + esc(r.clave) + '</span><span class="menor">' + esc(r.placa) + "</span>" +
           (d.conBases && !base ? '<span class="menor">' + esc(r.bases.join(", ")) + "</span>" : "") + "</td>" +
         "<td>" + (d.asistencia && r.conductores.length ? celdaConductores(r, d) : esc(capitalizar(r.conductores[0] || "—")) + otros) + "</td>" +
+        (d.alist ? '<td class="alist-celda">' + celdaAlist(r.alist) + "</td>" : "") +
         celdasNumeros(r) +
         "<td>" + chipsEstado(r) + "</td></tr>";
     });
@@ -1345,13 +1360,14 @@
       d.filas.forEach(function (f) {
         if (visibles.some(function (r) { return r.clave === f.interno; })) sumarViaje(suma, f);
       });
-      html += '<tfoot><tr><td colspan="2">' + visibles.length + " buses</td>" + celdasNumeros(suma) + "<td></td></tr></tfoot>";
+      html += '<tfoot><tr><td colspan="' + (d.alist ? 3 : 2) + '">' + visibles.length + " buses</td>" + celdasNumeros(suma) + "<td></td></tr></tfoot>";
     }
     html += "</table>";
     tabla.innerHTML = html;
     $("diaPie").textContent = d.cargadoEn ? "Actualizado a las " + fmtHora.format(new Date(d.cargadoEn)) +
       ". Diferencia = lo que dice el conductor menos lo del sensor, solo en los viajes que ya llegaron." +
       (d.asistencia ? " Inicio de labores = la entrada en la asistencia (celular u oficina), buscada por el nombre del conductor." : "") +
+      (d.alist ? " Alistamiento = la revisión diaria del bus (SICOV); salió sin alistamiento = el primer despacho fue antes de tenerlo." : "") +
       (d.conBases ? " La base es la de la programación del día." : " No se pudo leer la programación: sin las bases.") : "";
   }
 
@@ -1567,6 +1583,7 @@
       b.error = null;
       b.base = "";
       b.estadoBus = null;
+      b.alistDatos = b.alist = b.alistDetalle = null;
     }
     actualizarPestanas();
     pintarBus();
@@ -1670,6 +1687,8 @@
         traerAsistencia(fecha, false).catch(function () { return null; }),
         traerProgramacion(fecha).catch(function () { return null; }),
         traerListaPersonal().catch(function () { return null; }),
+        // el alistamiento del día (sql v16)
+        traerAlistamientos(fecha, false).catch(function () { return null; }),
       ]);
       if (res[0].error) throw res[0].error;
       if (b.interno !== interno || b.fecha !== fecha) return;
@@ -1691,6 +1710,17 @@
       b.listaPersonal = res[14] || null;
       b.horas = horasDe(b.filas);
       b.novedades = res[11] && !res[11].error ? res[11].data || [] : [];
+      b.alistDatos = res[15] || null;
+      b.alist = alistDe(b.alistDatos, interno, (b.filas[0] && b.filas[0].placa) || (b.estadoBus && b.estadoBus.placa));
+      b.alistDetalle = null;
+      if (b.alist) {
+        var idAlist = b.alist.id;
+        traerDetalleAlist(idAlist).then(function (det) { return det; }, function () { return "error"; }).then(function (det) {
+          if (b.interno !== interno || b.fecha !== fecha || !b.alist || b.alist.id !== idAlist) return;
+          b.alistDetalle = det;
+          if (state.vista === "bus" && b.filas) pintarBus();
+        });
+      }
       b.novPorClave = {};
       b.novedades.forEach(function (x) { if (x.clave_viaje) (b.novPorClave[x.clave_viaje] = b.novPorClave[x.clave_viaje] || []).push(x); });
       b.fotosPersonal = await fotosDelPersonal(b.personal.map(function (p) { return p.id_local; }))
@@ -1752,7 +1782,7 @@
     }
     if (!b.filas.length) {
       $("busExcel").disabled = $("busImprimir").disabled = true;
-      cuerpo.innerHTML = avisoDelBus(b.estadoBus) + '<p class="vacio">El bus ' + esc(b.interno) + " no tiene viajes en la tarjeta del " +
+      cuerpo.innerHTML = avisoDelBus(b.estadoBus) + bloqueAlistamiento(b) + '<p class="vacio">El bus ' + esc(b.interno) + " no tiene viajes en la tarjeta del " +
         esc(fechaLarga(b.fecha).toLowerCase()) + "." + (b.estadoBus ? "" : " Revise el número, o puede que el programa del servidor todavía no la haya publicado.") +
         "</p>" + bloquePersonalSinViaje(b.personal || []);
       return;
@@ -1782,6 +1812,7 @@
           (dm.observaciones ? dato("Observaciones del día", dm.observaciones) : "")) +
       "</div>";
     html += '<div class="totales">' + totalesHtml(r) + "</div>";
+    html += bloqueAlistamiento(b);
 
     html += '<div class="tabla-caja"><table class="tarjeta"><thead><tr>' +
       "<th>Viaje</th><th>Salió</th><th>Ruta</th><th>Conductor</th>" +
@@ -2830,6 +2861,365 @@
     XLSX.utils.book_append_sheet(libro, hojaDe(personas, { Conductor: 34 }), "Por conductor");
     XLSX.utils.book_append_sheet(libro, hojaDe(viajes.length ? viajes : [{ "Viajes": "Ninguno" }], { Conductor: 34 }), "Viajes");
     XLSX.writeFile(libro, "por_conductor_" + c.fecha + ".xlsx");
+  }
+
+  // ================================================================ ALISTAMIENTO (sql v16)
+  // Pedido del usuario el 22-oct-2026: integrar la app de alistamiento, la revisión diaria del bus que va a la
+  // Supertransporte por GESMOVIL ("va atada a todo"). Es una por placa y por día calendario. El bus sale de la flota
+  // por la placa: la misma lista que ve el conductor en el formulario ("KTO059 — interno 708"), y él escoge por el
+  // interno. Lo leen control_alistamientos y control_alistamiento_detalle (almacentro/enturnes/sql/
+  // control_alistamientos.sql); las tablas del SICOV no se tocan. Se ve en el Día (columna y filtro), en la tarjeta del
+  // bus (los 40 puntos), en la pestaña Alistamiento, y el aviso "Salió sin alistamiento": el bus hizo su primer
+  // despacho sin tenerlo, o lo hizo después de salir. Ej. 22-oct: el 723 alistó a las 2:33 y salió a las 2:56 (bien).
+  // Lo que el conductor declara de descanso y alcohol (dato de salud) solo lo ven los despachadores.
+  var ESTADOS_ALIST = {
+    salio: { orden: 0, tono: "mal", texto: "Salió sin alistamiento" },
+    novedad: { orden: 1, tono: "revisa", texto: "Con novedad" },
+    falta: { orden: 2, tono: "info", texto: "Falta" },
+    ok: { orden: 3, tono: "ok", texto: "Hecho" },
+    nosalio: { orden: 4, tono: "", texto: "No salió" },
+  };
+  var alistGuardado = {};                     // fecha -> { t, promesa }
+
+  function normPlaca(p) { return String(p || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); }
+
+  // { sinFuncion, lista, porBus, porPlaca } de ese día. Sin el SQL v16: sinFuncion y nada más.
+  function traerAlistamientos(fecha, fresco) {
+    var g = alistGuardado[fecha];
+    var vida = fecha === diaDeHoy() ? cfg.REFRESCO_MS || 120000 : 30 * 60 * 1000;
+    if (g && !fresco && Date.now() - g.t < vida) return g.promesa;
+    var promesa = conTiempo(client.rpc("control_alistamientos", { p_desde: fecha, p_hasta: fecha })).then(function (r) {
+      if (r.error) {
+        if (sinLaFuncion(r.error)) return { sinFuncion: true, lista: [], porBus: {}, porPlaca: {} };
+        throw r.error;
+      }
+      var al = { sinFuncion: false, lista: r.data || [], porBus: {}, porPlaca: {} };
+      // Vienen en orden de hora: si un bus tiene dos placas y las dos se alistaron, cuenta la primera.
+      al.lista.forEach(function (a) {
+        var k = String(a.interno || "").trim();
+        if (k && !al.porBus[k]) al.porBus[k] = a;
+        al.porPlaca[normPlaca(a.placa)] = a;
+      });
+      return al;
+    });
+    alistGuardado[fecha] = { t: Date.now(), promesa: promesa };
+    promesa.catch(function () { if (alistGuardado[fecha] && alistGuardado[fecha].promesa === promesa) delete alistGuardado[fecha]; });
+    return promesa;
+  }
+
+  function alistDe(al, interno, placa) {
+    if (!al || al.sinFuncion) return null;
+    return al.porBus[String(interno).trim()] || (placa && al.porPlaca[normPlaca(placa)]) || null;
+  }
+
+  // La hora del primer despacho del bus (los viajes sin despacho no cuentan: no fue una salida oficial).
+  function primerDespacho(filas, interno) {
+    var primero = null;
+    (filas || []).forEach(function (f) {
+      if (String(f.interno).trim() !== String(interno).trim() || f.sin_despacho) return;
+      var t = f.hora_salida || f.despacho_en;
+      if (t && (!primero || Date.parse(t) < Date.parse(primero))) primero = t;
+    });
+    return primero;
+  }
+
+  // ok / novedad (hecho antes de salir), salio (salió sin tenerlo, o lo hizo después), falta (hoy: ni salió ni lo
+  // tiene; todavía puede salir), nosalio (otro día: ni salió ni lo tiene, no hacía falta).
+  function estadoAlist(a, salida, fecha) {
+    if (a && (!salida || Date.parse(a.registrado_en) <= Date.parse(salida))) {
+      return { tipo: a.estado === "CON_NOVEDAD" ? "novedad" : "ok", a: a, salida: salida };
+    }
+    if (salida) return { tipo: "salio", a: a, salida: salida };
+    return { tipo: fecha === diaDeHoy() ? "falta" : "nosalio", a: null, salida: null };
+  }
+
+  function textoNovedadAlist(a) {
+    if (!a) return "";
+    var partes = [];
+    if (a.fallas) partes.push(a.fallas === 1 ? "1 punto con falla" : a.fallas + " puntos con falla");
+    if (a.autorreporte_no) partes.push("declaró que no está en condiciones");
+    if (!partes.length && a.estado === "CON_NOVEDAD") partes.push("novedad del conductor");
+    return partes.join(" · ");
+  }
+
+  // "03:40 · KTO059" / "lo hizo 06:29, salió 05:10" / "salió 05:10"
+  function detalleAlist(e) {
+    if (e.tipo === "salio") return e.a ? "lo hizo " + hora(e.a.registrado_en) + ", salió " + hora(e.salida) : "salió " + hora(e.salida);
+    if (!e.a) return "";
+    return hora(e.a.registrado_en) + " · " + e.a.placa + (e.tipo === "novedad" ? " · " + textoNovedadAlist(e.a) : "");
+  }
+
+  function celdaAlist(e) {
+    if (!e) return "—";
+    var x = ESTADOS_ALIST[e.tipo];
+    return chip(x.tono, x.texto) + (detalleAlist(e) ? '<span class="menor">' + esc(detalleAlist(e)) + "</span>" : "");
+  }
+
+  // El cuadro de arriba del Día: cuántos buses lo tienen y cuántos salieron sin él.
+  function totalAlist(buses) {
+    var con = buses.filter(function (r) { return r.alist; });
+    if (!con.length) return "";
+    var cuenta = { ok: 0, novedad: 0, salio: 0, falta: 0, nosalio: 0 };
+    con.forEach(function (r) { cuenta[r.alist.tipo]++; });
+    con = con.filter(function (r) { return r.alist.tipo !== "nosalio"; });
+    var hechos = cuenta.ok + cuenta.novedad;
+    var chico = [];
+    if (cuenta.salio) chico.push(cuenta.salio === 1 ? "1 salió sin alistamiento" : cuenta.salio + " salieron sin alistamiento");
+    if (cuenta.novedad) chico.push(cuenta.novedad + " con novedad");
+    if (cuenta.falta) chico.push(cuenta.falta + " sin salir todavía");
+    return '<div class="total" data-tono="' + (cuenta.salio ? "mal" : cuenta.novedad ? "revisa" : "bien") + '"><span>Alistamiento</span><strong>' +
+      hechos + " de " + con.length + "</strong><small>" + esc(chico.join(" · ") || "todos antes de salir") + "</small></div>";
+  }
+
+  // Los 40 puntos de un alistamiento (control_alistamiento_detalle), agrupados como en el formulario.
+  function traerDetalleAlist(id) {
+    return conTiempo(client.rpc("control_alistamiento_detalle", { p_id: id })).then(function (r) {
+      if (r.error) throw r.error;
+      return r.data || [];
+    });
+  }
+
+  // El bloque de la tarjeta del bus.
+  function bloqueAlistamiento(b) {
+    if (!b.alistDatos || b.alistDatos.sinFuncion) return "";
+    var e = estadoAlist(b.alist, primerDespacho(b.filas, b.interno), b.fecha);
+    var a = e.a;
+    var x = ESTADOS_ALIST[e.tipo];
+    var html = '<div class="registro alist-bloque" data-tono="' + x.tono + '"><div class="registro-cabeza"><b>Alistamiento del día</b>' +
+      chip(x.tono, x.texto) + "</div>";
+    if (!a) {
+      html += '<p class="nota">' + (e.tipo === "salio"
+        ? "El bus hizo su primer despacho a las " + esc(hora(e.salida)) + " y no tiene el alistamiento de este día."
+        : e.tipo === "falta" ? "Todavía no tiene el alistamiento de hoy." : "No tiene alistamiento ni despachos este día.") + "</p></div>";
+      return html;
+    }
+    var datos = ["Hecho a las " + hora(a.registrado_en), "placa " + a.placa,
+      "lo registró " + capitalizar(a.conductor_nombre || "") + (state.revisor && a.conductor_cedula ? " (CC " + a.conductor_cedula + ")" : "")];
+    if (a.kilometraje != null) datos.push("km " + miles(a.kilometraje));
+    if (e.salida) datos.push("primer despacho " + hora(e.salida));
+    html += "<p>" + esc(datos.join(" · ")) + "</p>";
+    if (e.tipo === "salio") html += '<p class="aviso-programa">Lo hizo después de salir: el bus salió a las ' + esc(hora(e.salida)) + ".</p>";
+    if (a.autorreporte_no) {
+      html += '<p class="aviso-programa">El conductor declaró que no está en condiciones para operar (descanso o alcohol y sustancias)' +
+        (a.apto_observacion ? ": “" + esc(a.apto_observacion) + "”" : "") + ".</p>";
+    }
+    if (a.observaciones) html += "<p><b>Observaciones:</b> " + esc(a.observaciones) + "</p>";
+    var det = b.alistDetalle;
+    if (det === "error") {
+      html += '<p class="nota">No se pudieron traer los puntos revisados.</p>';
+    } else if (!det) {
+      html += '<p class="cargando">Trayendo los puntos revisados…</p>';
+    } else {
+      var malos = det.filter(function (p) { return !p.conforme; });
+      if (malos.length) {
+        html += '<ul class="alist-fallas">' + malos.map(function (p) {
+          return "<li><strong>" + esc(p.descripcion) + "</strong>" + (p.grupo ? " · " + esc(p.grupo) : "") +
+            (p.observacion ? ': “' + esc(p.observacion) + "”" : "") + "</li>";
+        }).join("") + "</ul>";
+      }
+      var grupos = [];
+      det.forEach(function (p) {
+        var g = grupos.filter(function (x) { return x.nombre === (p.grupo || "Otros"); })[0];
+        if (!g) grupos.push(g = { nombre: p.grupo || "Otros", puntos: [] });
+        g.puntos.push(p);
+      });
+      html += '<details class="alist-puntos"><summary>Los ' + det.length + " puntos revisados" +
+        (malos.length ? " · " + malos.length + " con falla" : " · todos sin novedad") + "</summary>" +
+        grupos.map(function (g) {
+          return "<h4>" + esc(g.nombre) + '</h4><ul class="alist-lista">' + g.puntos.map(function (p) {
+            return '<li data-conforme="' + p.conforme + '"><span aria-hidden="true">' + (p.conforme ? "✓" : "✕") + "</span>" +
+              esc(p.descripcion) + (p.observacion ? ' <span class="menor">' + esc(p.observacion) + "</span>" : "") + "</li>";
+          }).join("") + "</ul>";
+        }).join("") + "</details>";
+    }
+    return html + "</div>";
+  }
+
+  // ---- la pestaña Alistamiento: todos los buses del día
+  function abrirAlistamiento(fecha) {
+    var s = state.alist;
+    var cambio = s.fecha !== fecha;
+    s.fecha = fecha;
+    $("alistFecha").value = fecha;
+    actualizarPestanas();
+    if (cambio || !s.buses) {
+      s.buses = null;
+      s.error = null;
+      pintarAlistamiento();
+      cargarAlistamiento();
+    } else {
+      pintarAlistamiento();
+    }
+  }
+
+  async function cargarAlistamiento(sola) {
+    var s = state.alist, fecha = s.fecha;
+    var listo = sola ? sinCarga : empezarCarga("Trayendo los alistamientos del " + fechaLarga(fecha).toLowerCase() + "…");
+    s.cargando = true;
+    $("alistActualizar").disabled = true;
+    try {
+      var res = await Promise.all([
+        traerAlistamientos(fecha, true),
+        traerTodo(function () {
+          return client.from("tarjeta_viajes").select("clave,interno,despacho_en,sin_despacho").eq("dia", fecha).order("clave");
+        }),
+        traerTodo(function () { return client.from("tarjeta_buses_dia").select("interno,placa").eq("dia", fecha).order("interno"); })
+          .catch(function () { return []; }),
+        traerBases(fecha, fecha).catch(function () { return null; }),
+      ]);
+      if (s.fecha !== fecha) return;
+      var al = res[0];
+      s.sinFuncion = al.sinFuncion;
+      if (al.sinFuncion) { s.buses = []; s.error = null; return; }
+      var buses = {};
+      function bus(interno) {
+        var k = String(interno || "").trim();
+        return buses[k] || (buses[k] = { interno: k, placa: "", viajes: 0, base: baseEn(res[3], k, fecha) || SIN_BASE });
+      }
+      res[2].forEach(function (x) { if (x.interno !== "PRUEBA") bus(x.interno).placa = x.placa || ""; });
+      res[1].forEach(function (f) { if (f.interno !== "PRUEBA") bus(f.interno).viajes++; });
+      al.lista.forEach(function (a) { if (a.interno) bus(a.interno); });
+      s.buses = Object.keys(buses).filter(Boolean).map(function (k) {
+        var r = buses[k];
+        r.e = estadoAlist(alistDe(al, k, r.placa), primerDespacho(res[1], k), fecha);
+        return r;
+      }).sort(function (a, b) { return ESTADOS_ALIST[a.e.tipo].orden - ESTADOS_ALIST[b.e.tipo].orden || compararInternos(a.interno, b.interno); });
+      // Las placas alistadas que no son de ningún bus de la flota (el conductor no pudo escoger otra cosa, pero por si acaso).
+      s.sueltos = al.lista.filter(function (a) { return !a.interno; });
+      s.cargadoEn = Date.now();
+      s.error = null;
+      // Los puntos con falla de los que tienen novedad, para verlos sin abrir cada bus.
+      var conFallas = al.lista.filter(function (a) { return a.fallas; });
+      s.fallas = {};
+      await Promise.all(conFallas.map(function (a) {
+        return traerDetalleAlist(a.id).then(function (det) {
+          s.fallas[a.id] = det.filter(function (p) { return !p.conforme; });
+        }).catch(function () {});
+      }));
+    } catch (err) {
+      if (s.fecha === fecha) s.error = err;
+    } finally {
+      listo();
+      s.cargando = false;
+      $("alistActualizar").disabled = false;
+      if (state.vista === "alistamiento" && s.fecha === fecha) pintarAlistamiento();
+    }
+  }
+
+  function alistVisibles() {
+    var s = state.alist;
+    return (s.buses || []).filter(function (r) { return (!s.base || r.base === s.base) && (!s.estado || r.e.tipo === s.estado); });
+  }
+
+  function textoFallas(a) {
+    var lista = a && (state.alist.fallas || {})[a.id];
+    if (!lista || !lista.length) return "";
+    return lista.map(function (p) { return p.descripcion + (p.observacion ? " (" + p.observacion + ")" : ""); }).join(" · ");
+  }
+
+  function pintarAlistamiento() {
+    var s = state.alist;
+    var cuerpo = $("alistCuerpo");
+    $("alistSub").textContent = fechaLarga(s.fecha) + ". La revisión diaria de cada bus (la app de alistamiento, que va a la " +
+      "Supertransporte por GESMOVIL): uno por bus y por día, antes del primer despacho.";
+    $("alistExcel").disabled = !s.buses || !s.buses.length;
+    $("alistEstado").value = s.estado;
+    if (s.sinFuncion) {
+      cuerpo.innerHTML = '<p class="caja-error">Falta correr control_alistamientos.sql (la versión 16 del SQL de la tarjeta) en Supabase.</p>';
+      return;
+    }
+    if (!s.buses) {
+      cuerpo.innerHTML = s.error ? cajaError("No se pudo traer el alistamiento: " + textoError(s.error), "recargar-alistamiento")
+        : '<p class="cargando">Trayendo los alistamientos…</p>';
+      return;
+    }
+    var sel = $("alistBase"), bases = {};
+    s.buses.forEach(function (r) { bases[r.base] = (bases[r.base] || 0) + 1; });
+    sel.innerHTML = '<option value="">Todas las bases</option>' + Object.keys(bases).sort(compararBases).map(function (b) {
+      return '<option value="' + esc(b) + '">' + esc(b + " · " + bases[b] + (bases[b] === 1 ? " bus" : " buses")) + "</option>";
+    }).join("");
+    sel.value = bases[s.base] ? s.base : "";
+    s.base = sel.value;
+    var deBase = s.buses.filter(function (r) { return !s.base || r.base === s.base; });
+    var cuenta = { ok: 0, novedad: 0, salio: 0, falta: 0, nosalio: 0 };
+    deBase.forEach(function (r) { cuenta[r.e.tipo]++; });
+    var esHoy = s.fecha === diaDeHoy();
+    function caja(titulo, grande, chico, tono) {
+      return '<div class="total"' + (tono ? ' data-tono="' + tono + '"' : "") + "><span>" + titulo + "</span><strong>" + grande + "</strong>" +
+        (chico ? "<small>" + chico + "</small>" : "") + "</div>";
+    }
+    var html = '<div class="totales">' +
+      caja("Buses", deBase.length - cuenta.nosalio, cuenta.nosalio ? "salieron o lo tienen · " + cuenta.nosalio + " no salieron" : "salieron o lo tienen") +
+      caja("Hechos antes de salir", cuenta.ok + cuenta.novedad, cuenta.novedad ? cuenta.novedad + " con novedad" : "sin novedades", "bien") +
+      caja("Salieron sin alistamiento", cuenta.salio, "o lo hicieron después de salir", cuenta.salio ? "mal" : "") +
+      caja("Con novedad", cuenta.novedad, "fallas en el bus o el conductor", cuenta.novedad ? "revisa" : "") +
+      (esHoy ? caja("Faltan", cuenta.falta, "no han salido ni lo tienen", cuenta.falta ? "revisa" : "") : "") +
+      "</div>";
+    if (s.sueltos && s.sueltos.length) {
+      html += '<p class="nota">' + esc(s.sueltos.length + (s.sueltos.length === 1 ? " alistamiento con una placa" : " alistamientos con placas") +
+        " que no están en la flota: " + s.sueltos.map(function (a) { return a.placa; }).join(", ") + ".") + "</p>";
+    }
+    var lista = alistVisibles();
+    if (!s.buses.length) {
+      html += '<p class="vacio">Nadie ha hecho el alistamiento y ningún bus ha salido este día.</p>';
+    } else if (!lista.length) {
+      html += '<p class="vacio">Ningún bus con ese filtro.</p>';
+    } else {
+      html += '<div class="tabla-caja"><table><thead><tr><th>Estado</th><th>Bus</th><th>Base</th><th>Alistamiento</th>' +
+        "<th>Primer despacho</th><th>Lo registró</th><th>Novedades</th></tr></thead><tbody>" +
+        lista.map(function (r) {
+          var a = r.e.a, x = ESTADOS_ALIST[r.e.tipo];
+          var tarde = r.e.tipo === "salio" && a ? Math.round((Date.parse(a.registrado_en) - Date.parse(r.e.salida)) / 60000) : null;
+          var nov = a ? [tarde != null ? "lo hizo " + (tarde === 1 ? "1 minuto" : tarde + " minutos") + " después del despacho" : "",
+            textoNovedadAlist(a), textoFallas(a), a.autorreporte_no && a.apto_observacion ? "“" + a.apto_observacion + "”" : "",
+            a.observaciones ? "Obs.: " + a.observaciones : ""].filter(Boolean).join(" · ") : "";
+          return '<tr class="fila-link" tabindex="0" data-bus="' + esc(r.interno) + '" data-fecha="' + esc(s.fecha) + '">' +
+            "<td>" + chip(x.tono, x.texto) + "</td>" +
+            '<td><span class="bus-num">' + esc(r.interno) + '</span><span class="menor">' + esc(a ? a.placa : r.placa) + "</span></td>" +
+            "<td>" + esc(r.base) + "</td>" +
+            '<td class="num">' + (a ? "<strong>" + esc(hora(a.registrado_en)) + "</strong>" +
+              (a.kilometraje != null ? '<span class="menor">km ' + esc(miles(a.kilometraje)) + "</span>" : "") : "—") + "</td>" +
+            '<td class="num">' + (r.e.salida ? esc(hora(r.e.salida)) : r.viajes ? "sin despacho" : "—") + "</td>" +
+            "<td>" + (a ? esc(capitalizar(a.conductor_nombre || "")) + (state.revisor && a.conductor_cedula ? '<span class="menor">' + esc(a.conductor_cedula) + "</span>" : "") : "—") + "</td>" +
+            '<td class="obs">' + (nov ? esc(nov) : "—") + "</td></tr>";
+        }).join("") + "</tbody></table></div>";
+    }
+    html += '<p class="pie">' + (s.cargadoEn ? "Actualizado a las " + fmtHora.format(new Date(s.cargadoEn)) + ". " : "") +
+      "Salió sin alistamiento = el bus hizo su primer despacho sin tenerlo, o lo hizo después de salir. Es uno por bus y por día " +
+      "(lo hace el primer conductor). Toque un bus para ver los puntos revisados." +
+      (state.revisor ? " Lo que declara el conductor de descanso y alcohol solo lo ven los despachadores." : "") + "</p>";
+    cuerpo.innerHTML = html;
+  }
+
+  function excelAlistamiento() {
+    var s = state.alist;
+    if (!s.buses || !s.buses.length) return;
+    var lista = alistVisibles();
+    var filas = lista.map(function (r) {
+      var a = r.e.a;
+      var x = { "Día": s.fecha, "Base": r.base, "Bus": r.interno, "Placa": a ? a.placa : r.placa, "Estado": ESTADOS_ALIST[r.e.tipo].texto,
+        "Alistamiento": a ? hora(a.registrado_en) : "", "Primer despacho": r.e.salida ? hora(r.e.salida) : "",
+        "Lo registró": a ? capitalizar(a.conductor_nombre || "") : "" };
+      if (state.revisor) x["Cédula"] = a ? a.conductor_cedula || "" : "";
+      x["Km"] = a && a.kilometraje != null ? a.kilometraje : "";
+      x["Puntos"] = a ? a.puntos : "";
+      x["Con falla"] = a ? a.fallas : "";
+      if (state.revisor) x["Declaró no estar en condiciones"] = a && a.autorreporte_no ? "Sí" : "";
+      x["Observaciones"] = a ? a.observaciones || "" : "";
+      return x;
+    });
+    var fallas = [];
+    lista.forEach(function (r) {
+      var a = r.e.a;
+      ((a && (s.fallas || {})[a.id]) || []).forEach(function (p) {
+        fallas.push({ "Bus": r.interno, "Placa": a.placa, "Hora": hora(a.registrado_en), "Grupo": p.grupo || "", "Punto": p.descripcion,
+          "Lo que encontró": p.observacion || "" });
+      });
+    });
+    var libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hojaDe(filas, { "Lo registró": 34, Observaciones: 40 }), "Alistamiento");
+    XLSX.utils.book_append_sheet(libro, hojaDe(fallas.length ? fallas : [{ "Fallas": "Ninguna" }], { Punto: 40, "Lo que encontró": 40 }), "Fallas");
+    XLSX.writeFile(libro, "alistamiento_" + s.fecha + ".xlsx");
   }
 
   // ================================================================ novedades del conductor (sql v11)
@@ -5087,6 +5477,20 @@
     $("conEstado").addEventListener("change", function () { state.con.estado = this.value; pintarConductores(); });
     $("conExcel").addEventListener("click", excelConductores);
 
+    // Alistamiento (sql v16)
+    alCambiarFechas(["alistFecha"], function () { location.hash = "#/alistamiento/" + $("alistFecha").value; });
+    $("alistAntes").addEventListener("click", function () { location.hash = "#/alistamiento/" + sumarDias(state.alist.fecha, -1); });
+    $("alistDespues").addEventListener("click", function () { location.hash = "#/alistamiento/" + sumarDias(state.alist.fecha, 1); });
+    $("alistHoy").addEventListener("click", function () { location.hash = "#/alistamiento/" + diaDeHoy(); });
+    $("alistActualizar").addEventListener("click", function () { cargarAlistamiento(); });
+    $("alistBase").addEventListener("change", function () {
+      state.alist.base = state.con.base = state.dia.base = state.inf.base = this.value;
+      guardarBase(this.value);
+      pintarAlistamiento();
+    });
+    $("alistEstado").addEventListener("change", function () { state.alist.estado = this.value; pintarAlistamiento(); });
+    $("alistExcel").addEventListener("click", excelAlistamiento);
+
     // Novedades del conductor
     $("novForm").addEventListener("submit", function (ev) {
       ev.preventDefault();
@@ -5144,6 +5548,7 @@
         else if (accion === "recargar-informe") consultarInforme();
         else if (accion === "recargar-gestores") cargarGestores();
         else if (accion === "recargar-conductores") cargarConductores();
+        else if (accion === "recargar-alistamiento") cargarAlistamiento();
         else if (accion === "recargar-movilidad") cargarMovilidad();
         else if (accion === "recargar-novedades") cargarNovedades();
         return;
@@ -5211,6 +5616,8 @@
       if (state.user && (state.vista === "dia" || state.vista === "bases") && !document.hidden && state.dia.fecha === diaDeHoy() && !state.dia.cargando) cargarDia(true);
       if (state.user && state.vista === "conductores" && !document.hidden && state.con.fecha === diaDeHoy() && !state.con.cargando &&
           state.con.personas) cargarConductores(true);
+      if (state.user && state.vista === "alistamiento" && !document.hidden && state.alist.fecha === diaDeHoy() && !state.alist.cargando &&
+          state.alist.buses) cargarAlistamiento(true);
     }, cfg.REFRESCO_MS);
 
     client.auth.getSession().then(function (r) {

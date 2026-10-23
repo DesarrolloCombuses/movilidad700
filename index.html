@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./css/control.css?v=0.19.0">
+  <link rel="stylesheet" href="./css/control.css?v=0.20.0">
 </head>
 <body>
 
@@ -52,6 +52,7 @@
       <a href="#/dia" data-pestana="dia">Día</a>
       <a href="#/bases" data-pestana="bases">Por base</a>
       <a href="#/conductores" data-pestana="conductores">Por conductor</a>
+      <a href="#/alistamiento" data-pestana="alistamiento">Alistamiento</a>
       <a href="#/bus" data-pestana="bus">Tarjeta del bus</a>
       <a href="#/informes" data-pestana="informes">Informes</a>
       <a href="#/movilidad" data-pestana="movilidad">Movilidad</a>
@@ -99,6 +100,7 @@
           <button type="button" data-filtro="sin_despacho" aria-pressed="false">Sin despacho</button>
           <button type="button" data-filtro="personal" aria-pressed="false">Personal de la empresa</button>
           <button type="button" data-filtro="sin_inicio" aria-pressed="false">Sin inicio de labores</button>
+          <button type="button" data-filtro="sin_alistamiento" aria-pressed="false">Sin alistamiento</button>
         </div>
         <select id="diaBase" aria-label="Base" hidden><option value="">Todas las bases</option></select>
         <select id="diaRuta" aria-label="Ruta"><option value="">Todas las rutas</option></select>
@@ -153,6 +155,34 @@
         </div>
       </div>
       <div id="conCuerpo"></div>
+    </section>
+
+    <!-- ---- Alistamiento (sql v16): la revisión diaria de cada bus, la de la app del SICOV ---- -->
+    <section id="vistaAlistamiento" class="vista" hidden>
+      <div class="cabeza">
+        <div>
+          <h1>Alistamiento</h1>
+          <p id="alistSub" class="sub"></p>
+        </div>
+        <div class="controles">
+          <select id="alistBase" aria-label="Base"><option value="">Todas las bases</option></select>
+          <select id="alistEstado" aria-label="Estado">
+            <option value="">Todos</option>
+            <option value="salio">Salió sin alistamiento</option>
+            <option value="novedad">Con novedad</option>
+            <option value="falta">Falta</option>
+            <option value="ok">Hecho</option>
+            <option value="nosalio">No salió</option>
+          </select>
+          <button id="alistAntes" class="btn btn-sutil btn-cuadro" type="button" title="Día anterior" aria-label="Día anterior">‹</button>
+          <input id="alistFecha" type="date" aria-label="Día">
+          <button id="alistDespues" class="btn btn-sutil btn-cuadro" type="button" title="Día siguiente" aria-label="Día siguiente">›</button>
+          <button id="alistHoy" class="btn btn-sutil" type="button">Hoy</button>
+          <button id="alistActualizar" class="btn" type="button">Actualizar</button>
+          <button id="alistExcel" class="btn btn-sutil" type="button" disabled>Excel</button>
+        </div>
+      </div>
+      <div id="alistCuerpo"></div>
     </section>
 
     <!-- ---- La tarjeta de un bus ---- -->
@@ -383,7 +413,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="./js/control-config.js?v=0.19.0"></script>
-<script src="./js/control.js?v=0.19.0"></script>
+<script src="./js/control-config.js?v=0.20.0"></script>
+<script src="./js/control.js?v=0.20.0"></script>
 </body>
 </html>
