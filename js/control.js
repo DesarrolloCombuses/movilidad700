@@ -3333,6 +3333,17 @@
     return Object.keys(dias).sort().map(function (k) { return dias[k]; });
   }
 
+  // Los días del rango con viajes que todavía no tienen el Metro (la cívica) cargado: en esos los Ingresos y el Total
+  // salidas salen sin restarlo (lo pidió el usuario el 22-oct-2026: "esto es importante").
+  function diasSinMetro(dias) {
+    var conViajes = dias.filter(function (d) { return d.trabajaron; });
+    return { conViajes: conViajes, faltan: conViajes.filter(function (d) { return d.metro == null; }).map(function (d) { return d.dia; }) };
+  }
+  function diaMetro(dia) {
+    var s = diaSemana(dia).slice(0, 3) + " " + fechaCorta(dia);
+    return dia === diaDeHoy() ? s + " (hoy)" : s;
+  }
+
   function numMov(x) { return x == null ? "—" : miles(x) === "0" ? "0" : (x < 0 ? "−" : "") + miles(x); }
   function diaSemana(dia) { return DIAS_SEMANA[new Date(dia + "T12:00:00Z").getUTCDay()]; }
   function fechaMov(dia) { var p = dia.split("-"); return p[2] + "/" + p[1] + "/" + p[0]; }   // 14/10/2026, como 700control
@@ -3461,6 +3472,18 @@
     if (falta) html += '<p class="aviso-programa">' + falta + "</p>";
     if (m.novedadesError) html += '<p class="aviso-programa">No se pudieron traer los trasbordos de las novedades (' + esc(textoError(m.novedadesError)) +
       "): los Ajustes salen sin ellos.</p>";
+    var sm = diasSinMetro(dias);
+    if (m.tablas && sm.conViajes.length) {
+      var quien = state.revisor ? "Se carga con el botón <strong>Cargar Metro</strong>, arriba." : "Lo cargan los despachadores con el botón Cargar Metro.";
+      html += '<div class="mov-metro" id="movMetroFalta" data-tono="' + (sm.faltan.length ? "mal" : "ok") + '">' +
+        (sm.faltan.length
+          ? "<p><strong>Metro (cívica): " + (sm.faltan.length === 1 ? "falta por cargar 1 día" : "faltan por cargar " + sm.faltan.length + " días") +
+            "</strong> de " + sm.conViajes.length + " con viajes en estas fechas.</p>" +
+            '<div class="chips">' + sm.faltan.map(function (dia) { return chip("mal", diaMetro(dia)); }).join("") + "</div>" +
+            '<p class="menor">Mientras no se cargue, esos días los Ingresos totales y el Total salidas salen sin restar los Pasajeros metro. ' + quien + "</p>"
+          : "<p><strong>Metro (cívica): todos los días cargados</strong> (" + sm.conViajes.length + " de " + sm.conViajes.length + " con viajes en estas fechas).</p>") +
+        "</div>";
+    }
     if (t) {
       html += '<div class="totales">' +
         '<div class="total"><span>Días</span><strong>' + dias.length + "</strong><small>" + miles(t.buses) + " renglones bus-día</small></div>" +
@@ -3473,8 +3496,9 @@
             .filter(Boolean).join(" · ") || "escritos por los despachadores") + "</small></div>" +
         '<div class="total" data-tono="bien"><span>Ingresos totales</span><strong>' + numMov(t.ingresos) + "</strong><small>Total salidas " +
           numMov(t.salidas) + " · Dif " + numMov(t.dif) + "</small></div>" +
-        '<div class="total"><span>Pasajeros metro</span><strong>' + numMov(t.metro) + "</strong><small>" +
-          (t.metro == null ? "todavía no se ha cargado el archivo" : "de los archivos cargados") + "</small></div>" +
+        '<div class="total"' + (sm.faltan.length ? ' data-tono="mal"' : "") + "><span>Pasajeros metro</span><strong>" + numMov(t.metro) + "</strong><small>" +
+          (t.metro == null ? "todavía no se ha cargado el archivo"
+            : (sm.conViajes.length - sm.faltan.length) + " de " + sm.conViajes.length + " días cargados") + "</small></div>" +
         "</div>";
     }
     var hoy = diaDeHoy(), elegido = m.filtro.dia;
@@ -3489,7 +3513,8 @@
         '<td class="n">' + d.trabajaron + "/" + d.buses + '</td><td class="n">' + d.viajesReal + '</td><td class="n">' + numMov(d.sonar) +
         '</td><td class="n">' + numMov(d.sinRuta) + '</td><td class="n">' + numMov(d.ajuste) +
         '</td><td class="n"><strong>' + numMov(d.ingresos) + '</strong></td><td class="n">' + numMov(d.salidas) +
-        '</td><td class="n">' + numMov(d.dif) + '</td><td class="n">' + numMov(d.metro) + "</td><td>" +
+        '</td><td class="n">' + numMov(d.dif) + '</td><td class="n">' +
+        (d.metro == null && d.trabajaron && m.tablas ? chip("mal", "Falta") : numMov(d.metro)) + "</td><td>" +
         (d.dia === hoy || d.enCurso ? chip("revisa", d.dia === hoy ? "Hoy: todavía cambia" : "Con viajes en camino") : "") + "</td></tr>";
     });
     html += "</tbody></table></div></details>";
@@ -4177,6 +4202,12 @@
       });
       A.cerrar();
       var N = libro.addWorksheet("Notas");
+      var sinMetro = diasSinMetro(resumenMovilidadPorDia(m.filas)).faltan;
+      if (sinMetro.length) {
+        N.addRow(["OJO: " + (sinMetro.length === 1 ? "este día todavía no tiene" : "estos " + sinMetro.length + " días todavía no tienen") +
+          " el Metro (cívica) cargado, y sus Ingresos totales y Total salidas salen sin restarlo: " + sinMetro.map(diaMetro).join(", ") + "."]);
+        N.getRow(1).font = { bold: true, color: { argb: "FFB42318" } };
+      }
       [
         "Movilidad de la ruta " + MOV_RUTA + " sacada del Portal de Control, del " + m.desde + " al " + m.hasta +
           ": un renglón por bus y día, como la hoja Base de datos de Movilidad 2026 (las mismas 25 columnas, en el mismo orden).",

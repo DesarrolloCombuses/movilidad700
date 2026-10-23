@@ -270,6 +270,20 @@ que trabajaron"*. Pestaña **Por conductor** (`#/conductores/fecha`):
   salió por el biométrico o por la programación).
 - Sin la función en la base dice *"Falta correr tarjeta_viajes_conductor.sql"*.
 
+### Los días que faltan por cargar el Metro (v0.19.0)
+
+Pedido del usuario el 22-oct-2026: *"mostrar en la movilidad qué días faltan por adicionar la cívica del metro, esto es
+importante"*. En **Movilidad**, arriba de los totales:
+
+- **En rojo:** *"Metro (cívica): faltan por cargar N días"* y un cuadrito por cada día de las fechas escogidas que tiene
+  viajes y todavía no tiene el Metro. Esos días los Ingresos totales y el Total salidas salen sin restarlo.
+- **En verde**, cuando todos los días con viajes ya lo tienen.
+- El total *Pasajeros metro* dice cuántos días están cargados (*"1 de 22 días cargados"*), y en el Resumen por día la
+  columna Metro dice *Falta*.
+- El Excel trae la misma lista en rojo, arriba de la hoja Notas.
+- Un día cuenta como cargado cuando tiene al menos un renglón de `movilidad_externos` con fuente `metro` (Cargar Metro
+  deja en 0 los buses que trabajaron y no salen en el archivo).
+
 ### El día de la tarjeta
 
 Es el día de la empresa: **de 2:30 a. m. a 2:30 a. m. del día siguiente**. Un viaje va al día de la hora de su

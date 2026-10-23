@@ -418,6 +418,14 @@ td .selfie-personal { width: 52px; height: 52px; }
 @media (max-width: 420px) { .celulares { grid-template-columns: 1fr; } }
 
 /* ---------------------------------------------------------------- movilidad (movilidad.sql) */
+/* los días que faltan por cargar el Metro (la cívica) */
+.mov-metro { display: grid; gap: 8px; margin: 0 0 14px; padding: 12px 16px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--soft); }
+.mov-metro[data-tono="mal"] { background: var(--danger-soft); border-color: var(--danger); }
+.mov-metro p { margin: 0; }
+.mov-metro[data-tono="mal"] > p:first-child strong { color: var(--danger); }
+.mov-metro .chips { gap: 6px; }
+.mov-metro .chip { font-size: 13px; padding: 3px 10px; background: var(--panel); border: 1px solid var(--danger); }
+.mov-metro .menor { display: block; color: var(--ink-2); }
 .mov-resumen { margin-bottom: 14px; }
 .mov-resumen > summary { cursor: pointer; font-weight: 750; padding: 6px 0 10px; }
 /* la ayuda de la movilidad */
